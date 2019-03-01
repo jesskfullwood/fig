@@ -16,8 +16,11 @@ features = [
   'Attr',
   'Document',
   'Element',
+  'Event',
   'EventTarget',
   'HtmlElement',
+  'HtmlInputElement',
+  'InputEvent',
   'Node',
   'Window',
 ]

@@ -2,17 +2,19 @@ use tree::log;
 use tree::*;
 use wasm_bindgen::prelude::*;
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 struct Model {
     select: String,
     check: bool,
     input: String,
 }
 
+#[derive(Clone, Debug)]
 enum Msg {
     Select(String),
     ToggleCheck,
     Input(String),
+    ButtonClick
 }
 
 impl tree::Model for Model {
@@ -20,6 +22,7 @@ impl tree::Model for Model {
 }
 
 fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
+    log!("Update: {:?}", msg);
     match msg {
         Msg::Select(select) => (Model { select, ..model }, Cmd::None),
         Msg::ToggleCheck => (
@@ -30,6 +33,10 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             Cmd::None,
         ),
         Msg::Input(input) => (Model { input, ..model }, Cmd::None),
+        Msg::ButtonClick => {
+            log!("Click!");
+            (model, Cmd::None)
+        }
     }
 }
 
@@ -38,7 +45,10 @@ fn view(model: &Model) -> Html<Model> {
         (),
         (
             p((), text("This is some text")),
-            p((), input(placeholder("placeholder"), ())),
+            p((), input((on_input(Msg::Input),
+                         placeholder("placeholder")),
+                        ())),
+            p((), button(on_click(|| Msg::ButtonClick), text("Clicky!"))),
             select(
                 on_input(Msg::Select),
                 (
