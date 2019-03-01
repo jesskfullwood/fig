@@ -1,8 +1,8 @@
 use derive_more::Constructor;
-use wasm_bindgen::{JsValue};
-use web_sys::{Element, Document, Attr};
-use js_sys::{Function};
+use js_sys::Function;
 use std::rc::Rc;
+use wasm_bindgen::JsValue;
+use web_sys::{Attr, Document, Element};
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
@@ -35,12 +35,12 @@ pub enum Cmd<Msg> {
     Fetch,
 }
 
-pub fn run<M: Model>(
-    model: M,
-    update: UpdateFn<M, M::Msg>,
-    view: ViewFn<M>
-) {
-    let app = App { model, update, view };
+pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>) {
+    let app = App {
+        model,
+        update,
+        view,
+    };
     app.render_dom();
 }
 
@@ -54,7 +54,7 @@ pub struct Html<M: Model> {
 impl<M: Model> std::fmt::Display for Html<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Tag::Text(s) = &self.elem {
-            return write!(f, "{}", s)
+            return write!(f, "{}", s);
         }
         write!(f, "<{}>", self.elem)?;
         for c in &self.children {
@@ -86,9 +86,10 @@ impl<M: Model> Html<M> {
             use Attribute::*;
             match attr {
                 Value(val) => element.set_attribute("value", val)?,
+                Placeholder(val) => element.set_attribute("placeholder", val)?,
                 // OnClick(cb) => element.add_event_listener_with_callback("click", &click_fn::<M>(Rc::clone(cb)))?,
                 // OnInput(cb) => element.add_event_listener_with_callback("click", &input_fn(Rc::clone(cb)))?,
-                _ => ()
+                _ => (),
             }
         }
         for child in &self.children {
@@ -115,6 +116,7 @@ pub enum Tag {
     Select,
     Option,
     Text(String),
+    Input,
 }
 
 impl std::fmt::Display for Tag {
@@ -130,24 +132,26 @@ impl std::fmt::Display for Tag {
             Span => "span",
             Select => "select",
             Option => "option",
-            Text(text) => return write!(f, "{}", text)
+            Input => "input",
+            Text(text) => return write!(f, "{}", text),
         };
         write!(f, "{}", tag)
     }
 }
 
 macro_rules! make_elem {
-    ($func_name: ident, $tag: expr) => {
+    ($func_name: ident, $tag: ident) => {
         pub fn $func_name<M: Model, A: ToAttr<M>, C: ToHtml<M>>(attrs: A, children: C) -> Html<M> {
-            Html::new($tag, attrs.into_attrs(), children.into_html())
+            Html::new(Tag::$tag, attrs.into_attrs(), children.into_html())
         }
-    }
+    };
 }
 
-make_elem!(div, Tag::Div);
-make_elem!(p, Tag::P);
-make_elem!(select, Tag::Select);
-make_elem!(option, Tag::Option);
+make_elem!(div, Div);
+make_elem!(p, P);
+make_elem!(select, Select);
+make_elem!(option, Option);
+make_elem!(input, Input);
 
 pub fn text<M: Model>(s: impl ToString) -> Html<M> {
     Html::new(Tag::Text(s.to_string()), Vec::new(), Vec::new())
@@ -155,17 +159,25 @@ pub fn text<M: Model>(s: impl ToString) -> Html<M> {
 
 pub enum Attribute<M: Model> {
     Value(String),
+    Placeholder(String),
     Id(String),
     Style(Style),
     OnClick(Rc<dyn Fn() -> M::Msg>),
-    OnInput(Rc<Fn(String) -> M::Msg>)
+    OnInput(Rc<Fn(String) -> M::Msg>),
 }
 
 pub struct Style;
 
-pub fn value<M: Model>(val: impl ToString) -> Attribute<M> {
-    Attribute::Value(val.to_string())
+macro_rules! attr_key_value {
+    ($func_name: ident, $tag: ident) => {
+        pub fn $func_name<M: Model>(val: impl ToString) -> Attribute<M> {
+            Attribute::$tag(val.to_string())
+        }
+    };
 }
+
+attr_key_value!(value, Value);
+attr_key_value!(placeholder, Placeholder);
 
 pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Attribute<M> {
     Attribute::OnClick(Rc::new(f))
@@ -213,19 +225,12 @@ impl<M: Model> ToHtml<M> for Html<M> {
 }
 impl<M: Model> ToHtml<M> for (Html<M>, Html<M>) {
     fn into_html(self) -> Vec<Html<M>> {
-        vec![
-            self.0,
-            self.1,
-        ]
+        vec![self.0, self.1]
     }
 }
 impl<M: Model> ToHtml<M> for (Html<M>, Html<M>, Html<M>) {
     fn into_html(self) -> Vec<Html<M>> {
-        vec![
-            self.0,
-            self.1,
-            self.2,
-        ]
+        vec![self.0, self.1, self.2]
     }
 }
 
@@ -233,4 +238,3 @@ impl<M: Model> ToHtml<M> for (Html<M>, Html<M>, Html<M>) {
 macro_rules! log {
     ($($t:tt)*) => (web_sys::console::log_1(&format_args!($($t)*).to_string().into()))
 }
-

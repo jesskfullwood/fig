@@ -38,6 +38,7 @@ fn view(model: &Model) -> Html<Model> {
         (),
         (
             p((), text("This is some text")),
+            p((), input(placeholder("placeholder"), ())),
             select(
                 on_input(Msg::Select),
                 (
