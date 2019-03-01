@@ -49,7 +49,7 @@ impl<M: Model> App<M> {
                     let model = self.model.take().unwrap();
                     let (new_model, new_cmd) = (self.update)(msg, model);
                     self.model.replace(new_model);
-                    cmd = new_cmd;  // we go again
+                    cmd = new_cmd; // we go again
                 }
             }
             self.render_dom()?;
@@ -59,7 +59,6 @@ impl<M: Model> App<M> {
         }
         Ok(())
     }
-
 
     fn render_dom(&self) -> JsResult<()> {
         log!("render dom");
@@ -87,10 +86,11 @@ pub enum Cmd<Msg> {
 }
 
 pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>, target: &str) {
-
     let window = web_sys::window().expect("no global `window` exists");
     let document = window.document().expect("should have a document on window");
-    let target = document.get_element_by_id(target).expect("Target element not found");
+    let target = document
+        .get_element_by_id(target)
+        .expect("Target element not found");
     let target = target.dyn_into().expect("Target not a div");
 
     let app = App {
@@ -142,10 +142,7 @@ thread_local! {
     pub static APP: *mut () = std::ptr::null_mut();
 }
 
-fn input_element<M: Model>(
-    element: &Element,
-    cb: Rc<dyn Fn(String) -> M::Msg>,
-) -> JsResult<()> {
+fn input_element<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
     log!("New closure");
     let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
         App::<M>::with(|app| {
@@ -208,11 +205,13 @@ pub enum Tag {
     H3,
     H4,
     Input,
+    Li,
     Option,
     P,
     Select,
     Span,
     Text(String),
+    Ul,
 }
 
 impl std::fmt::Display for Tag {
@@ -226,11 +225,13 @@ impl std::fmt::Display for Tag {
             H3 => "h3",
             H4 => "h4",
             Input => "input",
+            Li => "li",
             P => "p",
             Option => "option",
             Select => "select",
             Span => "span",
             Text(text) => return write!(f, "{}", text),
+            Ul => "ul",
         };
         write!(f, "{}", tag)
     }
@@ -244,12 +245,14 @@ macro_rules! make_elem {
     };
 }
 
-make_elem!(div, Div);
 make_elem!(button, Button);
+make_elem!(div, Div);
+make_elem!(input, Input);
+make_elem!(li, Li);
+make_elem!(option, Option);
 make_elem!(p, P);
 make_elem!(select, Select);
-make_elem!(option, Option);
-make_elem!(input, Input);
+make_elem!(ul, Ul);
 
 pub fn text<M: Model>(s: impl ToString) -> Html<M> {
     Html::new(Tag::Text(s.to_string()), Vec::new(), Vec::new())
@@ -298,7 +301,7 @@ pub trait ToAttr<M: Model>: Sized {
 
 macro_rules! impl_to_attrs {
     ($($param:tt),*) => {
-        #[allow(non_snake_case)]
+        #[allow(non_snake_case, unused_parens)]
         impl<M: Model, $($param: Into<Attribute<M>>),*> ToAttr<M> for ($($param),*) {
             fn into_attrs(self) -> Vec<Attribute<M>> {
                 let ($($param),*) = self;
@@ -323,9 +326,15 @@ pub trait ToHtml<M: Model>: Sized {
     fn into_html(self) -> Vec<Html<M>>;
 }
 
+impl<M: Model, I: Into<Html<M>>> ToHtml<M> for Vec<I> {
+    fn into_html(self) -> Vec<Html<M>> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
 macro_rules! impl_to_html {
     ($($param:tt),*) => {
-        #[allow(non_snake_case)]
+        #[allow(non_snake_case, unused_parens)]
         impl<M: Model, $($param: Into<Html<M>>),*> ToHtml<M> for ($($param),*) {
             fn into_html(self) -> Vec<Html<M>> {
                 let ($($param),*) = self;

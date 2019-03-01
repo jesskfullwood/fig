@@ -76,6 +76,12 @@ fn view(model: &Model) -> Html<Model> {
                     option(value("c"), text("c")),
                 ),
             ),
+            ul(
+                (),
+                (0..10)
+                    .map(|i| li((), text(format!("List item {}", i))))
+                    .collect::<Vec<_>>(),
+            ),
         ),
     )
 }
