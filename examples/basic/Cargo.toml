@@ -1,0 +1,13 @@
+[package]
+name = "basic"
+version = "0.1.0"
+authors = ["jesskfulwood <jesskfulwood@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tree = { path = "../../" }
+wasm-bindgen = "0.2.37"
+web-sys = "0.3.14"

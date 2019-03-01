@@ -1,0 +1,23 @@
+[package]
+name = "tree"
+version = "0.1.0"
+authors = ["jesskfulwood <jesskfulwood@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+derive_more = "0.14.0"
+wasm-bindgen = "0.2.37"
+js-sys = "0.3.14"
+
+[dependencies.web-sys]
+version = "0.3.14"
+features = [
+  'console',
+  'Attr',
+  'Document',
+  'Element',
+  'EventTarget',
+  'HtmlElement',
+  'Node',
+  'Window',
+]
