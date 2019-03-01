@@ -23,5 +23,6 @@ features = [
   'HtmlInputElement',
   'InputEvent',
   'Node',
+  'NodeList',
   'Window',
 ]

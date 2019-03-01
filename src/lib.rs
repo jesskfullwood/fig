@@ -2,7 +2,7 @@ use derive_more::Constructor;
 use js_sys::Function;
 use std::rc::Rc;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use web_sys::{Attr, Document, Element, HtmlDivElement};
+use web_sys::{Attr, Document, Element, HtmlDivElement, HtmlElement};
 
 use std::borrow::BorrowMut;
 use std::fmt::{self, Debug};
@@ -22,6 +22,7 @@ struct App<M: Model> {
     model: Option<M>,
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
+    current_vdom: Html<M>,
 }
 
 impl<M: Model> Drop for App<M> {
@@ -52,22 +53,25 @@ impl<M: Model> App<M> {
                     cmd = new_cmd; // we go again
                 }
             }
-            self.render_dom()?;
             if loopct > 100 {
                 panic!("Infinite loop!")
             }
         }
+        // Don't render the new dom until we finish looping
+        self.current_vdom = self.render_dom()?;
         Ok(())
     }
 
-    fn render_dom(&self) -> JsResult<()> {
+    fn render_dom(&self) -> JsResult<Html<M>> {
         log!("render dom");
-        let vdom = (self.view)(self.model.as_ref().unwrap());
-        // TODO vdom diffing!
-        let root_element = vdom.render(&self.document)?;
-        self.target.set_inner_html("");
-        self.target.append_child(&*root_element)?;
-        Ok(())
+        let mut new_vdom = (self.view)(self.model.as_ref().unwrap());
+        if let Some(diff) = diff_vdom(&self.current_vdom, &new_vdom) {
+            log!("vdom diff: {:?}", diff);
+            let mut tmp_div = div((), new_vdom);
+            render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
+            new_vdom = tmp_div.children.remove(0);
+        }
+        Ok(new_vdom)
     }
 
     fn with(f: impl Fn(&mut Self)) {
@@ -79,33 +83,149 @@ impl<M: Model> App<M> {
     }
 }
 
+/// A tree describing which nodes have changed and how
+#[derive(Debug, Clone)]
+enum Diff {
+    Create,
+    Update,
+    Replace,
+    Remove,
+    Transitive { children: Vec<(u32, Diff)> },
+}
+
+fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
+    if current.tag != next.tag {
+        // assume everything can be nuked
+        return Some(Diff::Replace);
+    }
+
+    // TODO ordering may change?? Is it even possible to add new attrs?
+    // for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
+    //     if old_attr !=  new_attr {
+    //         // update the attribute
+    //     }
+    // }
+
+    let mut child_diffs = Vec::new();
+
+    // Find nodes which have been added/removed
+    // TODO better way to detect 'inserted' nodes with some kind of uuid
+    let curct = current.children.len() as isize;
+    let nextct = next.children.len() as isize;
+    if nextct > curct {
+        for ix in 0..(nextct - curct) {
+            child_diffs.push(((ix + curct) as u32, Diff::Create))
+        }
+    } else {
+        for ix in 0..(curct - nextct) {
+            child_diffs.push(((ix + nextct) as u32, Diff::Remove))
+        }
+    }
+
+    for (ix, (old, new)) in current
+        .children
+        .iter()
+        .zip(next.children.iter())
+        .enumerate()
+    {
+        if let Some(diff) = diff_vdom(old, new) {
+            child_diffs.push((ix as u32, diff))
+        }
+    }
+
+    if child_diffs.is_empty() {
+        None
+    } else {
+        Some(Diff::Transitive {
+            children: child_diffs,
+        })
+    }
+}
+
+fn render_diff<M: Model>(
+    this_vnode: &Html<M>,
+    child_diffs: &[(u32, Diff)],
+    this_el: &HtmlElement,
+    doc: &Document,
+) -> JsResult<()> {
+    let child_els = this_el.child_nodes();
+    for &(ix, ref diff) in child_diffs {
+        match diff {
+            Diff::Create => match this_vnode.children[ix as usize].render(doc)? {
+                Ok(new_el) => {
+                    this_el.append_child(&*new_el)?;
+                }
+                Err(text) => this_el.set_text_content(Some(text)),
+            },
+            Diff::Update => unimplemented!(),
+            Diff::Replace => {
+                let old_el = child_els.get(ix).expect("bad node index");
+                match this_vnode.children[ix as usize].render(doc)? {
+                    Ok(new_el) => {
+                        this_el.replace_child(&*new_el, &old_el)?;
+                    }
+                    Err(text) => {
+                        this_el.set_text_content(Some(text));
+                        this_el.remove_child(&old_el)?;
+                    }
+                }
+            }
+            Diff::Remove => {
+                let old_el = child_els.get(ix).expect("bad node index");
+                this_el.remove_child(&old_el)?;
+            }
+            Diff::Transitive { children } => {
+                let child_vnode = &this_vnode.children[ix as usize];
+                let child_el = child_els.get(ix);
+                let child_el = child_el
+                    .as_ref()
+                    .and_then(|e| e.dyn_ref())
+                    .expect("bad node index");
+                render_diff(&child_vnode, &*children, child_el, doc)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub enum Cmd<Msg> {
     None,
     Msg(Msg),
     Fetch,
 }
 
-pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>, target: &str) {
+pub fn run<M: Model>(
+    model: M,
+    update: UpdateFn<M, M::Msg>,
+    view: ViewFn<M>,
+    target: &str,
+) -> JsResult<()> {
     let window = web_sys::window().expect("no global `window` exists");
     let document = window.document().expect("should have a document on window");
     let target = document
         .get_element_by_id(target)
         .expect("Target element not found");
-    let target = target.dyn_into().expect("Target not a div");
-
+    let target: HtmlDivElement = target.dyn_into()?;
+    let initial = document.create_element(&Tag::Div.to_string())?;
+    target.set_inner_html(""); // blank the target div and create an initial root
+    target.append_child(&*initial)?;
     let app = App {
         document,
         target,
         model: Some(model),
         update,
         view,
+        current_vdom: Html::new(Tag::Div, Vec::new(), Vec::new()), // ^^ now the dome and vdom are in sync
     };
 
-    // leak the app so we can put it in thread local
+    // put app on the heap...
     let app = Box::new(app);
+    // and leak it so we can put it in a thread-local
     let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut ();
-
-    // Place app inside thread-local
+    // super unsafe. We swap our global void pointer to point to our app.
+    // We to do it this way because it isn't possible to have
+    // generics in globals. That is, the user of the library chooses their own Model
+    // so we can't know the full type of App in advance.
     APP.with(move |ptr| {
         let inner = ptr as *const *mut () as *mut *mut ();
         unsafe {
@@ -113,28 +233,32 @@ pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>, tar
         }
     });
 
+    // From this point on we only interact with App through App::with.
+    // Then it's safe, hopefully.
     App::<M>::with(|app| {
+        // initial render
         app.render_dom().expect("Render failed");
-    })
+    });
+    Ok(())
 }
 
 #[derive(Debug, Constructor)]
 pub struct Html<M: Model> {
-    elem: Tag,
+    tag: Tag,
     attrs: Vec<Attribute<M>>,
     children: Vec<Html<M>>,
 }
 
 impl<M: Model> std::fmt::Display for Html<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Tag::Text(s) = &self.elem {
+        if let Tag::Text(s) = &self.tag {
             return write!(f, "{}", s);
         }
-        write!(f, "<{}>", self.elem)?;
+        write!(f, "<{}>", self.tag)?;
         for c in &self.children {
             write!(f, "{}", c)?;
         }
-        write!(f, "</{}>", self.elem)
+        write!(f, "</{}>", self.tag)
     }
 }
 
@@ -143,7 +267,6 @@ thread_local! {
 }
 
 fn input_element<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
-    log!("New closure");
     let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
         App::<M>::with(|app| {
             let target: web_sys::EventTarget = event.target().expect("Missing target");
@@ -171,8 +294,14 @@ fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsR
 }
 
 impl<M: Model> Html<M> {
-    fn render(&self, document: &Document) -> JsResult<Element> {
-        let element = document.create_element(&self.elem.to_string())?;
+    fn render(&self, document: &Document) -> JsResult<Result<Element, &str>> {
+        // Annoying that we have to special-case the text
+        // but it is more logical this way (nicer to think of text
+        // as a leaf node rather than a property)
+        if let Tag::Text(ref text) = self.tag {
+            return Ok(Err(text));
+        }
+        let element = document.create_element(&self.tag.to_string())?;
         for attr in &self.attrs {
             use Attribute::*;
             match attr {
@@ -185,18 +314,18 @@ impl<M: Model> Html<M> {
             }
         }
         for child in &self.children {
-            if let Tag::Text(text) = &child.elem {
-                element.set_text_content(Some(text))
-            } else {
-                let child_elem = child.render(document)?;
-                element.append_child(&*child_elem)?;
+            match child.render(document)? {
+                Ok(child_elem) => {
+                    element.append_child(&*child_elem)?;
+                }
+                Err(text) => element.set_text_content(Some(text)),
             }
         }
-        Ok(element)
+        Ok(Ok(element))
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tag {
     Button,
     Div,
@@ -261,6 +390,7 @@ pub fn text<M: Model>(s: impl ToString) -> Html<M> {
 pub enum Attribute<M: Model> {
     Value(String),
     Placeholder(String),
+    Class(Vec<String>),
     Id(String),
     Style(Style),
     OnClick(Rc<dyn Fn() -> M::Msg>),
