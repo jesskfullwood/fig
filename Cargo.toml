@@ -18,6 +18,7 @@ features = [
   'Element',
   'Event',
   'EventTarget',
+  'HtmlDivElement',
   'HtmlElement',
   'HtmlInputElement',
   'InputEvent',

@@ -7,6 +7,7 @@ struct Model {
     select: String,
     check: bool,
     input: String,
+    click_ct: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -14,7 +15,7 @@ enum Msg {
     Select(String),
     ToggleCheck,
     Input(String),
-    ButtonClick
+    ButtonClick,
 }
 
 impl tree::Model for Model {
@@ -33,22 +34,40 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             Cmd::None,
         ),
         Msg::Input(input) => (Model { input, ..model }, Cmd::None),
-        Msg::ButtonClick => {
-            log!("Click!");
-            (model, Cmd::None)
-        }
+        Msg::ButtonClick => (
+            Model {
+                click_ct: model.click_ct + 1,
+                ..model
+            },
+            Cmd::None,
+        ),
     }
 }
 
 fn view(model: &Model) -> Html<Model> {
+    log!("view: {:?}", model);
     div(
-        (),
+        id("my-app"),
         (
             p((), text("This is some text")),
-            p((), input((on_input(Msg::Input),
-                         placeholder("placeholder")),
-                        ())),
-            p((), button(on_click(|| Msg::ButtonClick), text("Clicky!"))),
+            p(
+                (),
+                input(
+                    (
+                        value(&model.input),
+                        on_input(Msg::Input),
+                        placeholder("placeholder"),
+                    ),
+                    (),
+                ),
+            ),
+            p(
+                (),
+                button(
+                    on_click(|| Msg::ButtonClick),
+                    text(format!("Clicked: {}", model.click_ct)),
+                ),
+            ),
             select(
                 on_input(Msg::Select),
                 (
@@ -63,6 +82,6 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(Model::default(), update, view);
+    tree::run(Model::default(), update, view, "app");
     log!("Hi")
 }

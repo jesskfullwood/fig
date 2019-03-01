@@ -2,7 +2,7 @@ use derive_more::Constructor;
 use js_sys::Function;
 use std::rc::Rc;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use web_sys::{Attr, Document, Element};
+use web_sys::{Attr, Document, Element, HtmlDivElement};
 
 use std::borrow::BorrowMut;
 use std::fmt::{self, Debug};
@@ -10,11 +10,15 @@ use std::fmt::{self, Debug};
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
 
+type JsResult<T> = Result<T, JsValue>;
+
 pub trait Model: 'static {
     type Msg;
 }
 
 struct App<M: Model> {
+    document: Document,
+    target: HtmlDivElement,
     model: Option<M>,
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
@@ -22,7 +26,7 @@ struct App<M: Model> {
 
 impl<M: Model> Drop for App<M> {
     fn drop(&mut self) {
-        log!("dropping app")
+        log!("Warning: dropping app!")
     }
 }
 
@@ -33,15 +37,37 @@ impl<M: Model + Debug> Debug for App<M> {
 }
 
 impl<M: Model> App<M> {
-    fn render_dom(&self) -> Result<(), JsValue> {
-        log!("Render dom");
-        let window = web_sys::window().expect("no global `window` exists");
-        let document = window.document().expect("should have a document on window");
-        let body = document.body().expect("document should have a body");
-        log!("get vdom");
+    fn loop_update(&mut self, mut cmd: Cmd<M::Msg>) -> JsResult<()> {
+        let mut loopct = 0;
+        loop {
+            loopct += 1;
+            log!("Loop update (ct: {})", loopct);
+            match cmd {
+                Cmd::None => break,
+                Cmd::Fetch => unimplemented!(),
+                Cmd::Msg(msg) => {
+                    let model = self.model.take().unwrap();
+                    let (new_model, new_cmd) = (self.update)(msg, model);
+                    self.model.replace(new_model);
+                    cmd = new_cmd;  // we go again
+                }
+            }
+            self.render_dom()?;
+            if loopct > 100 {
+                panic!("Infinite loop!")
+            }
+        }
+        Ok(())
+    }
+
+
+    fn render_dom(&self) -> JsResult<()> {
+        log!("render dom");
         let vdom = (self.view)(self.model.as_ref().unwrap());
-        let root_element = vdom.render(&document)?;
-        body.append_child(&*root_element)?;
+        // TODO vdom diffing!
+        let root_element = vdom.render(&self.document)?;
+        self.target.set_inner_html("");
+        self.target.append_child(&*root_element)?;
         Ok(())
     }
 
@@ -60,9 +86,16 @@ pub enum Cmd<Msg> {
     Fetch,
 }
 
-pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>) {
-    log!("Run");
+pub fn run<M: Model>(model: M, update: UpdateFn<M, M::Msg>, view: ViewFn<M>, target: &str) {
+
+    let window = web_sys::window().expect("no global `window` exists");
+    let document = window.document().expect("should have a document on window");
+    let target = document.get_element_by_id(target).expect("Target element not found");
+    let target = target.dyn_into().expect("Target not a div");
+
     let app = App {
+        document,
+        target,
         model: Some(model),
         update,
         view,
@@ -112,16 +145,15 @@ thread_local! {
 fn input_element<M: Model>(
     element: &Element,
     cb: Rc<dyn Fn(String) -> M::Msg>,
-) -> Result<(), JsValue> {
+) -> JsResult<()> {
+    log!("New closure");
     let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
         App::<M>::with(|app| {
             let target: web_sys::EventTarget = event.target().expect("Missing target");
             let elem: &web_sys::HtmlInputElement =
                 target.dyn_ref().expect("Bad cast the html input element");
-            let msg = cb(elem.value());
-            let model = app.model.take().unwrap();
-            let (model, cmd) = (app.update)(msg, model);
-            app.model.replace(model);
+            let cmd = Cmd::Msg(cb(elem.value()));
+            app.loop_update(cmd).expect("Closure error")
         });
     }) as Box<FnMut(web_sys::InputEvent)>);
     element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
@@ -129,13 +161,11 @@ fn input_element<M: Model>(
     Ok(())
 }
 
-fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> Result<(), JsValue> {
+fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsResult<()> {
     let closure = Closure::wrap(Box::new(move || {
         App::<M>::with(|app| {
-            let msg = cb();
-            let model = app.model.take().unwrap();
-            let (model, cmd) = (app.update)(msg, model);
-            app.model.replace(model);
+            let cmd = Cmd::Msg(cb());
+            app.loop_update(cmd).expect("Closure error")
         });
     }) as Box<FnMut()>);
     element.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
@@ -144,14 +174,14 @@ fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> Res
 }
 
 impl<M: Model> Html<M> {
-    fn render(&self, document: &Document) -> Result<Element, JsValue> {
-        log!("render");
+    fn render(&self, document: &Document) -> JsResult<Element> {
         let element = document.create_element(&self.elem.to_string())?;
         for attr in &self.attrs {
             use Attribute::*;
             match attr {
                 Value(val) => element.set_attribute("value", val)?,
                 Placeholder(val) => element.set_attribute("placeholder", val)?,
+                Id(val) => element.set_attribute("id", val)?,
                 OnClick(cb) => click_element::<M>(&element, cb.clone())?,
                 OnInput(cb) => input_element::<M>(&element, cb.clone())?,
                 _ => (),
@@ -250,6 +280,7 @@ macro_rules! attr_key_value {
     };
 }
 
+attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
