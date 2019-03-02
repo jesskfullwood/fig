@@ -4,7 +4,8 @@ use std::rc::Rc;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{Attr, Document, Element, HtmlDivElement, HtmlElement};
 
-use std::borrow::BorrowMut;
+use std::borrow::Cow;
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
@@ -12,7 +13,7 @@ type ViewFn<Model> = fn(&Model) -> Html<Model>;
 
 type JsResult<T> = Result<T, JsValue>;
 
-pub trait Model: 'static {
+pub trait Model: 'static + Debug {
     type Msg;
 }
 
@@ -58,6 +59,7 @@ impl<M: Model> App<M> {
             }
         }
         // Don't render the new dom until we finish looping
+        log!("update vdom");
         self.current_vdom = self.render_dom()?;
         Ok(())
     }
@@ -70,6 +72,8 @@ impl<M: Model> App<M> {
             let mut tmp_div = div((), new_vdom);
             render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
             new_vdom = tmp_div.children.remove(0);
+        } else {
+            log!("No change");
         }
         Ok(new_vdom)
     }
@@ -87,10 +91,13 @@ impl<M: Model> App<M> {
 #[derive(Debug, Clone)]
 enum Diff {
     Create,
-    Update,
-    Replace,
     Remove,
-    Transitive { children: Vec<(u32, Diff)> },
+    Replace,
+    Update {
+        text: bool,
+        attrs: bool,
+        children: Vec<(u32, Diff)>,
+    },
 }
 
 fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
@@ -98,6 +105,9 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
         // assume everything can be nuked
         return Some(Diff::Replace);
     }
+
+    let text_changed = current.text != next.text;
+    let attr_changed = false; // TODO
 
     // TODO ordering may change?? Is it even possible to add new attrs?
     // for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
@@ -133,10 +143,12 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
         }
     }
 
-    if child_diffs.is_empty() {
+    if !text_changed && !attr_changed && child_diffs.is_empty() {
         None
     } else {
-        Some(Diff::Transitive {
+        Some(Diff::Update {
+            text: text_changed,
+            attrs: attr_changed,
             children: child_diffs,
         })
     }
@@ -148,39 +160,39 @@ fn render_diff<M: Model>(
     this_el: &HtmlElement,
     doc: &Document,
 ) -> JsResult<()> {
+    // This might seem slightly odd. Why are we applying changes to the children
+    // rather than this_el? Because we need to create, remove, replace them and
+    // these operations can only be done from the parent node
     let child_els = this_el.child_nodes();
     for &(ix, ref diff) in child_diffs {
         match diff {
-            Diff::Create => match this_vnode.children[ix as usize].render(doc)? {
-                Ok(new_el) => {
-                    this_el.append_child(&*new_el)?;
-                }
-                Err(text) => this_el.set_text_content(Some(text)),
-            },
-            Diff::Update => unimplemented!(),
+            Diff::Create => {
+                let new_el = this_vnode.children[ix as usize].render(doc)?;
+                this_el.append_child(&*new_el)?;
+            }
             Diff::Replace => {
                 let old_el = child_els.get(ix).expect("bad node index");
-                match this_vnode.children[ix as usize].render(doc)? {
-                    Ok(new_el) => {
-                        this_el.replace_child(&*new_el, &old_el)?;
-                    }
-                    Err(text) => {
-                        this_el.set_text_content(Some(text));
-                        this_el.remove_child(&old_el)?;
-                    }
-                }
+                let new_el = this_vnode.children[ix as usize].render(doc)?;
+                this_el.replace_child(&*new_el, &old_el)?;
             }
             Diff::Remove => {
                 let old_el = child_els.get(ix).expect("bad node index");
                 this_el.remove_child(&old_el)?;
             }
-            Diff::Transitive { children } => {
+            Diff::Update {
+                text,
+                attrs,
+                children,
+            } => {
                 let child_vnode = &this_vnode.children[ix as usize];
                 let child_el = child_els.get(ix);
-                let child_el = child_el
+                let child_el: &HtmlElement = child_el
                     .as_ref()
                     .and_then(|e| e.dyn_ref())
                     .expect("bad node index");
+                if *text {
+                    child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()))
+                }
                 render_diff(&child_vnode, &*children, child_el, doc)?;
             }
         }
@@ -215,7 +227,7 @@ pub fn run<M: Model>(
         model: Some(model),
         update,
         view,
-        current_vdom: Html::new(Tag::Div, Vec::new(), Vec::new()), // ^^ now the dome and vdom are in sync
+        current_vdom: Html::new(Tag::Div, None, Vec::new(), Vec::new()), // ^^ now the dome and vdom are in sync
     };
 
     // put app on the heap...
@@ -237,7 +249,7 @@ pub fn run<M: Model>(
     // Then it's safe, hopefully.
     App::<M>::with(|app| {
         // initial render
-        app.render_dom().expect("Render failed");
+        app.current_vdom = app.render_dom().expect("Render failed");
     });
     Ok(())
 }
@@ -245,16 +257,17 @@ pub fn run<M: Model>(
 #[derive(Debug, Constructor)]
 pub struct Html<M: Model> {
     tag: Tag,
+    text: Option<Cow<'static, str>>,
     attrs: Vec<Attribute<M>>,
     children: Vec<Html<M>>,
 }
 
 impl<M: Model> std::fmt::Display for Html<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if let Tag::Text(s) = &self.tag {
-            return write!(f, "{}", s);
-        }
         write!(f, "<{}>", self.tag)?;
+        if let Some(text) = &self.text {
+            return write!(f, "{}", text);
+        }
         for c in &self.children {
             write!(f, "{}", c)?;
         }
@@ -294,13 +307,7 @@ fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsR
 }
 
 impl<M: Model> Html<M> {
-    fn render(&self, document: &Document) -> JsResult<Result<Element, &str>> {
-        // Annoying that we have to special-case the text
-        // but it is more logical this way (nicer to think of text
-        // as a leaf node rather than a property)
-        if let Tag::Text(ref text) = self.tag {
-            return Ok(Err(text));
-        }
+    fn render(&self, document: &Document) -> JsResult<Element> {
         let element = document.create_element(&self.tag.to_string())?;
         for attr in &self.attrs {
             use Attribute::*;
@@ -313,15 +320,14 @@ impl<M: Model> Html<M> {
                 _ => (),
             }
         }
-        for child in &self.children {
-            match child.render(document)? {
-                Ok(child_elem) => {
-                    element.append_child(&*child_elem)?;
-                }
-                Err(text) => element.set_text_content(Some(text)),
-            }
+        if let Some(text) = &self.text {
+            element.set_text_content(Some(text.borrow()))
         }
-        Ok(Ok(element))
+        for child in &self.children {
+            let child_elem = child.render(document)?;
+            element.append_child(&*child_elem)?;
+        }
+        Ok(element)
     }
 }
 
@@ -339,7 +345,6 @@ pub enum Tag {
     P,
     Select,
     Span,
-    Text(String),
     Ul,
 }
 
@@ -359,7 +364,6 @@ impl std::fmt::Display for Tag {
             Option => "option",
             Select => "select",
             Span => "span",
-            Text(text) => return write!(f, "{}", text),
             Ul => "ul",
         };
         write!(f, "{}", tag)
@@ -369,23 +373,66 @@ impl std::fmt::Display for Tag {
 macro_rules! make_elem {
     ($func_name: ident, $tag: ident) => {
         pub fn $func_name<M: Model, A: ToAttr<M>, C: ToHtml<M>>(attrs: A, children: C) -> Html<M> {
-            Html::new(Tag::$tag, attrs.into_attrs(), children.into_html())
+            Html::new(Tag::$tag, None, attrs.into_attrs(), children.into_html())
         }
     };
 }
 
-make_elem!(button, Button);
+pub trait Stringify {
+    fn stringify(self) -> Option<Cow<'static, str>>;
+}
+
+impl Stringify for () {
+    fn stringify(self) -> Option<Cow<'static, str>> {
+        None
+    }
+}
+
+impl Stringify for &'static str {
+    fn stringify(self) -> Option<Cow<'static, str>> {
+        Some(self.into())
+    }
+}
+
+impl Stringify for String {
+    fn stringify(self) -> Option<Cow<'static, str>> {
+        Some(self.into())
+    }
+}
+
+macro_rules! make_elem_with_text {
+    ($func_name: ident, $tag: ident) => {
+        pub fn $func_name<M: Model>(
+            attrs: impl ToAttr<M>,
+            children: impl ToHtml<M>,
+            text: impl Stringify,
+        ) -> Html<M> {
+            Html::new(
+                Tag::$tag,
+                text.stringify(),
+                attrs.into_attrs(),
+                children.into_html(),
+            )
+        }
+    };
+}
+
+macro_rules! make_elem_no_kids {
+    ($func_name: ident, $tag: ident) => {
+        pub fn $func_name<M: Model>(attrs: impl ToAttr<M>, text: impl Stringify) -> Html<M> {
+            Html::new(Tag::$tag, text.stringify(), attrs.into_attrs(), Vec::new())
+        }
+    };
+}
+
+make_elem_no_kids!(button, Button);
+make_elem_no_kids!(li, Li);
+make_elem_no_kids!(option, Option);
+make_elem_no_kids!(input, Input);
+make_elem_with_text!(p, P);
 make_elem!(div, Div);
-make_elem!(input, Input);
-make_elem!(li, Li);
-make_elem!(option, Option);
-make_elem!(p, P);
 make_elem!(select, Select);
 make_elem!(ul, Ul);
-
-pub fn text<M: Model>(s: impl ToString) -> Html<M> {
-    Html::new(Tag::Text(s.to_string()), Vec::new(), Vec::new())
-}
 
 pub enum Attribute<M: Model> {
     Value(String),

@@ -2,12 +2,25 @@ use tree::log;
 use tree::*;
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct Model {
     select: String,
     check: bool,
     input: String,
     click_ct: u32,
+    list_ct: u32,
+}
+
+impl Default for Model {
+    fn default() -> Model {
+        Model {
+            select: String::new(),
+            check: false,
+            input: String::new(),
+            click_ct: 0,
+            list_ct: 5,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -16,6 +29,8 @@ enum Msg {
     ToggleCheck,
     Input(String),
     ButtonClick,
+    AddLi,
+    RmLi,
 }
 
 impl tree::Model for Model {
@@ -41,6 +56,24 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             },
             Cmd::None,
         ),
+        Msg::AddLi => (
+            Model {
+                list_ct: model.list_ct + 1,
+                ..model
+            },
+            Cmd::None,
+        ),
+        Msg::RmLi => (
+            Model {
+                list_ct: if model.list_ct > 0 {
+                    model.list_ct - 1
+                } else {
+                    0
+                },
+                ..model
+            },
+            Cmd::None,
+        ),
     }
 }
 
@@ -49,7 +82,7 @@ fn view(model: &Model) -> Html<Model> {
     div(
         id("my-app"),
         (
-            p((), text("This is some text")),
+            p((), (), "This is some text"),
             p(
                 (),
                 input(
@@ -60,26 +93,30 @@ fn view(model: &Model) -> Html<Model> {
                     ),
                     (),
                 ),
+                (),
             ),
             p(
                 (),
                 button(
                     on_click(|| Msg::ButtonClick),
-                    text(format!("Clicked: {}", model.click_ct)),
+                    format!("Clicked: {}", model.click_ct),
                 ),
+                (),
             ),
             select(
                 on_input(Msg::Select),
                 (
-                    option(value("a"), text("a")),
-                    option(value("b"), text("b")),
-                    option(value("c"), text("c")),
+                    option(value("a"), "a"),
+                    option(value("b"), "b"),
+                    option(value("c"), "c"),
                 ),
             ),
+            button(on_click(|| Msg::AddLi), "+ item"),
+            button(on_click(|| Msg::RmLi), "- item"),
             ul(
                 (),
-                (0..10)
-                    .map(|i| li((), text(format!("List item {}", i))))
+                (0..model.list_ct)
+                    .map(|i| li((), format!("List item {}", i)))
                     .collect::<Vec<_>>(),
             ),
         ),
