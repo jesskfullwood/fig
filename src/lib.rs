@@ -11,7 +11,6 @@ use html::Attribute;
 
 pub mod html;
 
-
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
 
@@ -279,7 +278,7 @@ impl<M: Model> std::fmt::Display for Html<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "<{}>", self.tag)?;
         if let Some(text) = &self.text {
-            return write!(f, "{}", text);
+            write!(f, "{}", text)?;
         }
         for c in &self.children {
             write!(f, "{}", c)?;
@@ -356,43 +355,39 @@ impl<M: Model> Html<M> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Tag {
-    Button,
-    Div,
-    H1,
-    H2,
-    H3,
-    H4,
-    Input,
-    Li,
-    Option,
-    P,
-    Select,
-    Span,
-    Ul,
+macro_rules! make_tags {
+    ($($typ:ident => $text:expr),* $(,)?) => {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum Tag {
+            $($typ,)*
+        }
+
+        impl std::fmt::Display for Tag {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                use Tag::*;
+                let tag = match self {
+                    $($typ => $text,)*
+                };
+                write!(f, "{}", tag)
+            }
+        }
+    }
 }
 
-impl std::fmt::Display for Tag {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use Tag::*;
-        let tag = match self {
-            Button => "button",
-            Div => "div",
-            H1 => "h1",
-            H2 => "h2",
-            H3 => "h3",
-            H4 => "h4",
-            Input => "input",
-            Li => "li",
-            P => "p",
-            Option => "option",
-            Select => "select",
-            Span => "span",
-            Ul => "ul",
-        };
-        write!(f, "{}", tag)
-    }
+make_tags! {
+    Button => "button",
+    Div => "div",
+    H1 => "h1",
+    H2 => "h2",
+    H3 => "h3",
+    H4 => "h4",
+    Input => "input",
+    Li => "li",
+    Option => "option",
+    P => "p",
+    Select => "select",
+    Span => "span",
+    Ul => "ul"
 }
 
 macro_rules! make_elem {
@@ -458,14 +453,6 @@ make_elem_with_text!(p, P);
 make_elem!(div, Div);
 make_elem!(select, Select);
 make_elem!(ul, Ul);
-
-pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Attribute<M> {
-    Attribute::OnClick(Rc::new(f))
-}
-
-pub fn on_input<M: Model>(f: impl Fn(String) -> M::Msg + 'static) -> Attribute<M> {
-    Attribute::OnInput(Rc::new(f))
-}
 
 pub trait ToAttr<M: Model>: Sized {
     fn into_attrs(self) -> Vec<Attribute<M>>;

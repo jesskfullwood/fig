@@ -31,6 +31,14 @@ attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
+pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Attribute<M> {
+    Attribute::OnClick(Rc::new(f))
+}
+
+pub fn on_input<M: Model>(f: impl Fn(String) -> M::Msg + 'static) -> Attribute<M> {
+    Attribute::OnInput(Rc::new(f))
+}
+
 
 pub fn class<M: Model>(c: impl Classify) -> Attribute<M> {
     Attribute::Class(c.classify())
@@ -38,7 +46,7 @@ pub fn class<M: Model>(c: impl Classify) -> Attribute<M> {
 
 pub struct Style;
 
-trait ElemMod<M: Model> {
+pub trait ElemMod<M: Model> {
     fn modify_element(self, elem: &mut Html<M>);
 }
 
@@ -51,8 +59,6 @@ impl<S: Into<Str>> Classify for S {
         vec![self.into()]
     }
 }
-
-
 
 impl<M: Model> ElemMod<M> for &'static str {
     fn modify_element(self, elem: &mut Html<M>) {
@@ -96,9 +102,9 @@ macro_rules! make_dsl_macros {
         $(
             #[macro_export]
             macro_rules! $name {
-                ($d($modifier:expr),*) => {
+                ($d($modifier:expr),* $d(,)?) => {
                     {
-                        use crate::{Html, Tag};
+                        use $crate::{Html, Tag, html::ElemMod};
                         let mut html = Html::tag(Tag::$tag);
                         $d($modifier.modify_element(&mut html);)*;
                         html
@@ -111,30 +117,9 @@ macro_rules! make_dsl_macros {
 
 // Pass in the '$' symbol - workaround for macro_rules bug - see
 // https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
-make_dsl_macros!($ div: Div, p: P, button: Button);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct M;
-    impl crate::Model for M {
-        type Msg = ();
-    }
-    #[test]
-    fn nested_div() {
-        let div: Html<M> = div!(
-            "some text", " more text",
-            p!(class("bluesy"), "Classy!")
-            // button!(
-            //     on_click(|| Msg::ButtonClick),
-            //     format!("Clicked: {}", model.click_ct)
-            // )
-            // select!(
-            //     on_input(Msg::Select),
-            //     option!(value("a"), "a"),
-            //     option!(value("b"), "b"),
-            //     option!(value("c"), "c"),
-            // ),
-        );
-    }
-}
+make_dsl_macros!($ div: Div,
+                 p: P,
+                 button: Button,
+                 option: Option,
+                 select: Select
+);
