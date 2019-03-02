@@ -1,19 +1,23 @@
 use derive_more::Constructor;
-use js_sys::Function;
 use std::rc::Rc;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use web_sys::{Attr, Document, Element, HtmlDivElement, HtmlElement};
+use web_sys::{Document, Element, HtmlDivElement, HtmlElement};
 
 use std::borrow::Cow;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
+
+use html::Attribute;
+
+pub mod html;
+
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
 
 type JsResult<T> = Result<T, JsValue>;
 
-pub trait Model: 'static + Debug {
+pub trait Model: 'static {
     type Msg;
 }
 
@@ -264,6 +268,13 @@ pub struct Html<M: Model> {
     children: Vec<Html<M>>,
 }
 
+impl<M: Model> Html<M> {
+    /// Create an empty tagged element
+    pub fn tag(tag: Tag) -> Html<M> {
+        Html::new(tag, None, Vec::new(), Vec::new())
+    }
+}
+
 impl<M: Model> std::fmt::Display for Html<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "<{}>", self.tag)?;
@@ -447,50 +458,6 @@ make_elem_with_text!(p, P);
 make_elem!(div, Div);
 make_elem!(select, Select);
 make_elem!(ul, Ul);
-
-pub enum Attribute<M: Model> {
-    Value(String),
-    Placeholder(String),
-    Class(Vec<Str>),
-    Id(String),
-    Style(Style),
-    OnClick(Rc<dyn Fn() -> M::Msg>),
-    OnInput(Rc<Fn(String) -> M::Msg>),
-}
-
-impl<M: Model> fmt::Debug for Attribute<M> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Attribute")
-    }
-}
-
-pub trait Classify {
-    fn classify(self) -> Vec<Str>;
-}
-
-impl<S: Into<Str>> Classify for S {
-    fn classify(self) -> Vec<Str> {
-        vec![self.into()]
-    }
-}
-
-pub struct Style;
-
-macro_rules! attr_key_value {
-    ($func_name: ident, $tag: ident) => {
-        pub fn $func_name<M: Model>(val: impl ToString) -> Attribute<M> {
-            Attribute::$tag(val.to_string())
-        }
-    };
-}
-
-attr_key_value!(id, Id);
-attr_key_value!(value, Value);
-attr_key_value!(placeholder, Placeholder);
-
-pub fn class<M: Model>(c: impl Classify) -> Attribute<M> {
-    Attribute::Class(c.classify())
-}
 
 pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Attribute<M> {
     Attribute::OnClick(Rc::new(f))
