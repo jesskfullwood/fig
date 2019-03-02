@@ -17,6 +17,8 @@ pub trait Model: 'static + Debug {
     type Msg;
 }
 
+type Str = Cow<'static, str>;
+
 struct App<M: Model> {
     document: Document,
     target: HtmlDivElement,
@@ -257,7 +259,7 @@ pub fn run<M: Model>(
 #[derive(Debug, Constructor)]
 pub struct Html<M: Model> {
     tag: Tag,
-    text: Option<Cow<'static, str>>,
+    text: Option<Str>,
     attrs: Vec<Attribute<M>>,
     children: Vec<Html<M>>,
 }
@@ -279,14 +281,20 @@ thread_local! {
     pub static APP: *mut () = std::ptr::null_mut();
 }
 
-fn input_element<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
+fn input_handler<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
+    log!("New input closure");
     let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
         App::<M>::with(|app| {
+            web_sys::console::time();
             let target: web_sys::EventTarget = event.target().expect("Missing target");
-            let elem: &web_sys::HtmlInputElement =
-                target.dyn_ref().expect("Bad cast the html input element");
-            let cmd = Cmd::Msg(cb(elem.value()));
-            app.loop_update(cmd).expect("Closure error")
+            let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
+            if let Some(val) = target_el.get_attribute("value") {
+                let cmd = Cmd::Msg(cb(val));
+                app.loop_update(cmd).expect("Closure error");
+            } else {
+                log!("Element does not have a 'value' attribute")
+            }
+            web_sys::console::time_end();
         });
     }) as Box<FnMut(web_sys::InputEvent)>);
     element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
@@ -294,12 +302,15 @@ fn input_element<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) 
     Ok(())
 }
 
-fn click_element<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsResult<()> {
+fn click_handler<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsResult<()> {
+    log!("New click closure");
     let closure = Closure::wrap(Box::new(move || {
+        web_sys::console::time();
         App::<M>::with(|app| {
             let cmd = Cmd::Msg(cb());
             app.loop_update(cmd).expect("Closure error")
         });
+        web_sys::console::time_end();
     }) as Box<FnMut()>);
     element.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
     closure.forget();
@@ -315,9 +326,12 @@ impl<M: Model> Html<M> {
                 Value(val) => element.set_attribute("value", val)?,
                 Placeholder(val) => element.set_attribute("placeholder", val)?,
                 Id(val) => element.set_attribute("id", val)?,
-                OnClick(cb) => click_element::<M>(&element, cb.clone())?,
-                OnInput(cb) => input_element::<M>(&element, cb.clone())?,
-                _ => (),
+                OnClick(cb) => click_handler::<M>(&element, cb.clone())?,
+                OnInput(cb) => input_handler::<M>(&element, cb.clone())?,
+                Class(classes) => {
+                    element.set_attribute("class", &classes.join(" "))?
+                },
+                Style(style) => (),
             }
         }
         if let Some(text) = &self.text {
@@ -379,23 +393,23 @@ macro_rules! make_elem {
 }
 
 pub trait Stringify {
-    fn stringify(self) -> Option<Cow<'static, str>>;
+    fn stringify(self) -> Option<Str>;
 }
 
 impl Stringify for () {
-    fn stringify(self) -> Option<Cow<'static, str>> {
+    fn stringify(self) -> Option<Str> {
         None
     }
 }
 
 impl Stringify for &'static str {
-    fn stringify(self) -> Option<Cow<'static, str>> {
+    fn stringify(self) -> Option<Str> {
         Some(self.into())
     }
 }
 
 impl Stringify for String {
-    fn stringify(self) -> Option<Cow<'static, str>> {
+    fn stringify(self) -> Option<Str> {
         Some(self.into())
     }
 }
@@ -437,7 +451,7 @@ make_elem!(ul, Ul);
 pub enum Attribute<M: Model> {
     Value(String),
     Placeholder(String),
-    Class(Vec<String>),
+    Class(Vec<Str>),
     Id(String),
     Style(Style),
     OnClick(Rc<dyn Fn() -> M::Msg>),
@@ -447,6 +461,16 @@ pub enum Attribute<M: Model> {
 impl<M: Model> fmt::Debug for Attribute<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Attribute")
+    }
+}
+
+pub trait Classify {
+    fn classify(self) -> Vec<Str>;
+}
+
+impl<S: Into<Str>> Classify for S {
+    fn classify(self) -> Vec<Str> {
+        vec![self.into()]
     }
 }
 
@@ -463,6 +487,10 @@ macro_rules! attr_key_value {
 attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
+
+pub fn class<M: Model>(c: impl Classify) -> Attribute<M> {
+    Attribute::Class(c.classify())
+}
 
 pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Attribute<M> {
     Attribute::OnClick(Rc::new(f))

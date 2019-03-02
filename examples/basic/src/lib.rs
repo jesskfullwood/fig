@@ -95,13 +95,15 @@ fn view(model: &Model) -> Html<Model> {
                 ),
                 (),
             ),
-            p(
+            div(
                 (),
-                button(
-                    on_click(|| Msg::ButtonClick),
-                    format!("Clicked: {}", model.click_ct),
+                (
+                    p(class("bluesy"), (), "Classy!"),
+                    button(
+                        on_click(|| Msg::ButtonClick),
+                        format!("Clicked: {}", model.click_ct),
+                    ),
                 ),
-                (),
             ),
             select(
                 on_input(Msg::Select),
