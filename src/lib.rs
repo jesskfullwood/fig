@@ -16,7 +16,7 @@ type ViewFn<Model> = fn(&Model) -> Html<Model>;
 
 type JsResult<T> = Result<T, JsValue>;
 
-pub trait Model: 'static {
+pub trait Model: 'static + Debug {
     type Msg;
 }
 
@@ -74,7 +74,7 @@ impl<M: Model> App<M> {
         let mut new_vdom = (self.view)(self.model.as_ref().unwrap());
         if let Some(diff) = diff_vdom(&self.current_vdom, &new_vdom) {
             log!("vdom diff: {:?}", diff);
-            let mut tmp_div = div((), new_vdom);
+            let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), vec![new_vdom]);
             render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
             new_vdom = tmp_div.children.remove(0);
         } else {
@@ -168,7 +168,7 @@ fn render_diff<M: Model>(
     // This might seem slightly odd. Why are we applying changes to the children
     // rather than this_el? Because we need to create, remove, replace them and
     // these operations can only be done from the parent node
-    let child_els = this_el.child_nodes();
+    let child_els = this_el.children();
     for &(ix, ref diff) in child_diffs {
         match diff {
             Diff::Create => {
@@ -176,12 +176,12 @@ fn render_diff<M: Model>(
                 this_el.append_child(&*new_el)?;
             }
             Diff::Replace => {
-                let old_el = child_els.get(ix).expect("bad node index");
+                let old_el = child_els.get_with_index(ix).expect("bad node index");
                 let new_el = this_vnode.children[ix as usize].render(doc)?;
                 this_el.replace_child(&*new_el, &old_el)?;
             }
             Diff::Remove => {
-                let old_el = child_els.get(ix).expect("bad node index");
+                let old_el = child_els.get_with_index(ix).expect("bad node index");
                 this_el.remove_child(&old_el)?;
             }
             Diff::Update {
@@ -190,13 +190,10 @@ fn render_diff<M: Model>(
                 children,
             } => {
                 let child_vnode = &this_vnode.children[ix as usize];
-                let child_el = child_els.get(ix);
-                let child_el: &HtmlElement = child_el
-                    .as_ref()
-                    .and_then(|e| e.dyn_ref())
-                    .expect("bad node index");
+                let child_el: Element = child_els.get_with_index(ix).expect("bad node index");
+                let child_el: &HtmlElement = child_el.dyn_ref().expect("bad element cast");
                 if *text {
-                    child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()))
+                    child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()));
                 }
                 render_diff(&child_vnode, &*children, child_el, doc)?;
             }
@@ -293,13 +290,15 @@ thread_local! {
 
 fn input_handler<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
     log!("New input closure");
+    let key = JsValue::from_str("value");
     let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
+        log!("Call input handler");
         App::<M>::with(|app| {
             web_sys::console::time();
             let target: web_sys::EventTarget = event.target().expect("Missing target");
             let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
-            if let Some(val) = target_el.get_attribute("value") {
-                let cmd = Cmd::Msg(cb(val));
+            if let Ok(val) = js_sys::Reflect::get(target_el, &key) {
+                let cmd = Cmd::Msg(cb(val.as_string().expect("value not a string")));
                 app.loop_update(cmd).expect("Closure error");
             } else {
                 log!("Element does not have a 'value' attribute")
@@ -315,6 +314,7 @@ fn input_handler<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) 
 fn click_handler<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsResult<()> {
     log!("New click closure");
     let closure = Closure::wrap(Box::new(move || {
+        log!("Call click handler");
         web_sys::console::time();
         App::<M>::with(|app| {
             let cmd = Cmd::Msg(cb());
@@ -338,9 +338,7 @@ impl<M: Model> Html<M> {
                 Id(val) => element.set_attribute("id", val)?,
                 OnClick(cb) => click_handler::<M>(&element, cb.clone())?,
                 OnInput(cb) => input_handler::<M>(&element, cb.clone())?,
-                Class(classes) => {
-                    element.set_attribute("class", &classes.join(" "))?
-                },
+                Class(classes) => element.set_attribute("class", &classes.join(" "))?,
                 Style(style) => (),
             }
         }
@@ -356,7 +354,7 @@ impl<M: Model> Html<M> {
 }
 
 macro_rules! make_tags {
-    ($($typ:ident => $text:expr),* $(,)?) => {
+    ($d:tt, $($typ:ident => $text:ident),* $(,)?) => {
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub enum Tag {
             $($typ,)*
@@ -366,36 +364,48 @@ macro_rules! make_tags {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 use Tag::*;
                 let tag = match self {
-                    $($typ => $text,)*
+                    $($typ => stringify!($text),)*
                 };
                 write!(f, "{}", tag)
             }
         }
+
+        $(
+            #[macro_export]
+            macro_rules! $text {
+                ($d($modifier:expr),* $d(,)?) => {
+                    {
+                        use $crate::{Html, Tag, html::ElemMod};
+                        let mut html = Html::tag(Tag::$typ);
+                        $d($modifier.modify_element(&mut html);)*;
+                        html
+                    }
+                }
+            }
+        )*
     }
 }
 
+// Why do we pass in the weird'$' symbol? Workaround for macro_rules bug - see
+// https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
 make_tags! {
-    Button => "button",
-    Div => "div",
-    H1 => "h1",
-    H2 => "h2",
-    H3 => "h3",
-    H4 => "h4",
-    Input => "input",
-    Li => "li",
-    Option => "option",
-    P => "p",
-    Select => "select",
-    Span => "span",
-    Ul => "ul"
-}
-
-macro_rules! make_elem {
-    ($func_name: ident, $tag: ident) => {
-        pub fn $func_name<M: Model, A: ToAttr<M>, C: ToHtml<M>>(attrs: A, children: C) -> Html<M> {
-            Html::new(Tag::$tag, None, attrs.into_attrs(), children.into_html())
-        }
-    };
+    $,
+    B => b,
+    Button => button,
+    Div => div,
+    Em => em,
+    H1 => h1,
+    H2 => h2,
+    H3 => h3,
+    H4 => h4,
+    I => i,
+    Input => input,
+    Li => li,
+    Option => option,
+    P => p,
+    Select => select,
+    Span => span,
+    Ul => ul
 }
 
 pub trait Stringify {
@@ -419,40 +429,6 @@ impl Stringify for String {
         Some(self.into())
     }
 }
-
-macro_rules! make_elem_with_text {
-    ($func_name: ident, $tag: ident) => {
-        pub fn $func_name<M: Model>(
-            attrs: impl ToAttr<M>,
-            children: impl ToHtml<M>,
-            text: impl Stringify,
-        ) -> Html<M> {
-            Html::new(
-                Tag::$tag,
-                text.stringify(),
-                attrs.into_attrs(),
-                children.into_html(),
-            )
-        }
-    };
-}
-
-macro_rules! make_elem_no_kids {
-    ($func_name: ident, $tag: ident) => {
-        pub fn $func_name<M: Model>(attrs: impl ToAttr<M>, text: impl Stringify) -> Html<M> {
-            Html::new(Tag::$tag, text.stringify(), attrs.into_attrs(), Vec::new())
-        }
-    };
-}
-
-make_elem_no_kids!(button, Button);
-make_elem_no_kids!(li, Li);
-make_elem_no_kids!(option, Option);
-make_elem_no_kids!(input, Input);
-make_elem_with_text!(p, P);
-make_elem!(div, Div);
-make_elem!(select, Select);
-make_elem!(ul, Ul);
 
 pub trait ToAttr<M: Model>: Sized {
     fn into_attrs(self) -> Vec<Attribute<M>>;

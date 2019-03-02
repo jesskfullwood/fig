@@ -1,4 +1,5 @@
-use tree::log;
+use tree::html::*;
+use tree::select;
 use tree::*;
 use wasm_bindgen::prelude::*;
 
@@ -79,49 +80,40 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
 
 fn view(model: &Model) -> Html<Model> {
     log!("view: {:?}", model);
-    div(
+    div!(
         id("my-app"),
-        (
-            p((), (), "This is some text"),
-            p(
-                (),
-                input(
-                    (
-                        value(&model.input),
-                        on_input(Msg::Input),
-                        placeholder("placeholder"),
-                    ),
-                    (),
-                ),
-                (),
+        h1!("Tree demo"),
+        p!("Enter some text!"),
+        div!(
+            input!(
+                value(model.input.clone()),
+                on_input(Msg::Input),
+                placeholder("placeholder")
             ),
-            div!(
-                p!(class("bluesy"), "Classy!"),
-                button!(
-                    on_click(|| Msg::ButtonClick),
-                    format!("Clicked: {}", model.click_ct),
-                ),
-                select!(
-                    on_input(Msg::Select),
-                    option!(value("a"), "a"),
-                    option!(value("b"), "b"),
-                    option!(value("c"), "c"),
-                ),
+            p!("Boldly repeat: ", b!(model.input.clone()))
+        ),
+        div!(
+            p!(class("bluesy"), "Classy!"),
+            button!(
+                on_click(|| Msg::ButtonClick),
+                format!("Clicked: {}", model.click_ct),
             ),
-            button(on_click(|| Msg::AddLi), "+ item"),
-            button(on_click(|| Msg::RmLi), "- item"),
-            ul(
-                (),
-                (0..model.list_ct)
-                    .map(|i| li((), format!("List item {}", i)))
-                    .collect::<Vec<_>>(),
+            select!(
+                on_input(Msg::Select),
+                option!(value("a"), "a"),
+                option!(value("b"), "b"),
+                option!(value("c"), "c"),
             ),
         ),
+        button!(on_click(|| Msg::AddLi), "+ item"),
+        button!(on_click(|| Msg::RmLi), "- item"),
+        ul!((0..model.list_ct)
+            .map(|i| li!(format!("List item {}", i)))
+            .collect::<Vec<_>>()),
     )
 }
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(Model::default(), update, view, "app");
-    log!("Hi")
+    tree::run(Model::default(), update, view, "app").expect("Failed to run");
 }
