@@ -224,12 +224,12 @@ fn render_diff<M: Model>(
     for &(ix, ref diff) in child_diffs {
         match diff {
             Diff::Create => {
-                let new_el = this_vnode.children[ix as usize].render(doc)?;
+                let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
                 this_el.append_child(&*new_el)?;
             }
             Diff::Replace => {
                 let old_el = child_els.get_with_index(ix).expect("bad node index");
-                let new_el = this_vnode.children[ix as usize].render(doc)?;
+                let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
                 this_el.replace_child(&*new_el, &old_el)?;
             }
             Diff::Remove => {
@@ -293,8 +293,19 @@ impl<M: Model> std::fmt::Display for Html<M> {
 }
 
 pub struct Listener<M: Model> {
+    element: Element,
+    type_: Str,
     closure: Closure<FnMut(DomEvent)>,
     marker: std::marker::PhantomData<M>,
+}
+
+impl<M: Model> Drop for Listener<M> {
+    fn drop(&mut self) {
+        log!("Detching listener");
+        self.element
+            .remove_event_listener_with_callback(&self.type_, self.closure.as_ref().unchecked_ref())
+            .expect("failed to remove");
+    }
 }
 
 impl<M: Model> Debug for Listener<M> {
@@ -304,19 +315,22 @@ impl<M: Model> Debug for Listener<M> {
 }
 
 impl<M: Model> Listener<M> {
-    fn new(closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
+    fn new(element: Element, type_: Str, closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
         Listener {
+            element,
+            type_,
             closure,
             marker: std::marker::PhantomData,
         }
     }
 }
 
-fn event_handler<M: Model, F: Fn(DomEvent) -> M::Msg + 'static>(
-    element: &Element,
+fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> M::Msg + 'static>(
+    element: Element,
+    event_name: S,
     handler: F,
-    event_name: &str,
 ) -> JsResult<Listener<M>> {
+    let event_name = event_name.into();
     log!("New event hander closure");
     let closure = Closure::wrap(Box::new(move |event: DomEvent| {
         web_sys::console::time();
@@ -326,8 +340,9 @@ fn event_handler<M: Model, F: Fn(DomEvent) -> M::Msg + 'static>(
         });
         web_sys::console::time_end();
     }) as Box<FnMut(DomEvent)>);
-    element.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
-    Ok(Listener::new(closure))
+    let jsfunction = closure.as_ref().unchecked_ref();
+    element.add_event_listener_with_callback(&event_name, jsfunction);
+    Ok(Listener::new(element, event_name, closure))
 }
 
 fn input_handler<M: Model>(
@@ -341,7 +356,7 @@ fn input_handler<M: Model>(
         let val = js_sys::Reflect::get(target_el, &key).expect("Failed to get property");
         handler(val.as_string().expect("value not a string"))
     };
-    event_handler::<M, _>(element, inner, "input")
+    event_handler::<M, _, _>(element.clone(), "input", inner)
 }
 
 fn click_handler<M: Model>(
@@ -349,7 +364,7 @@ fn click_handler<M: Model>(
     handler: Rc<dyn Fn() -> M::Msg>,
 ) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| handler();
-    event_handler::<M, _>(element, inner, "click")
+    event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
 fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
@@ -386,14 +401,18 @@ impl<M: Model> Html<M> {
         Ok(())
     }
 
-    fn render(&self, document: &Document) -> JsResult<Element> {
+    fn render_to_dom(&self, document: &Document) -> JsResult<Element> {
         let element = document.create_element(&self.tag.to_string())?;
         self.apply_attrs(&element)?;
         if let Some(text) = &self.text {
             element.set_text_content(Some(text.borrow()))
         }
+        for event in &self.events {
+            let listener = attach_event_listener(event, &element)?;
+            Box::leak(Box::new(listener));
+        }
         for child in &self.children {
-            let child_elem = child.render(document)?;
+            let child_elem = child.render_to_dom(document)?;
             element.append_child(&*child_elem)?;
         }
         Ok(element)

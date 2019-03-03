@@ -1,7 +1,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use crate::{Html, Listener, Model, Str};
+use crate::{Html, Model, Str, Listener};
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute {
@@ -11,12 +11,6 @@ pub enum Attribute {
     Id(Str),
     Style(Style),
 }
-
-// impl fmt::Debug for Attribute {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "Attribute")
-//     }
-// }
 
 pub enum Event<M: Model> {
     OnClick(Rc<dyn Fn() -> M::Msg>),
@@ -31,6 +25,7 @@ impl<M: Model> fmt::Debug for Event<M> {
         }
     }
 }
+
 
 // impl PartialEq for Attribute {
 //     fn eq(&self, other: &Self) -> bool {
