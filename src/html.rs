@@ -12,6 +12,7 @@ pub enum Attribute {
     Style(Style),
 }
 
+#[derive(Clone, PartialEq, Hash)]
 pub enum Event<M: Model> {
     OnClick(fn() -> M::Msg),
     OnInput(fn(String) -> M::Msg),
@@ -20,8 +21,8 @@ pub enum Event<M: Model> {
 impl<M: Model> fmt::Debug for Event<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Event::OnClick(_) => write!(f, "Event(OnClick)"),
-            Event::OnInput(_) => write!(f, "Event(OnInput)"),
+            Event::OnClick(ptr) => write!(f, "Event(OnClick({:p})", ptr),
+            Event::OnInput(ptr) => write!(f, "Event(OnInput({:p})", ptr),
         }
     }
 }

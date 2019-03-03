@@ -10,6 +10,7 @@ use std::fmt::{self, Debug};
 use html::{Attribute, Event};
 
 pub mod html;
+pub mod diff;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
@@ -169,6 +170,12 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
     let mut attr_changed = false;
 
     // TODO ordering may change?? Is it even possible to add new attrs?
+    for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
+        if old_attr != new_attr {
+            attr_changed = true
+        }
+    }
+
     for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
         if old_attr != new_attr {
             attr_changed = true
