@@ -76,13 +76,14 @@ impl<M: Model> App<M> {
     fn render_dom(&self) -> JsResult<Html<M>> {
         log!("render dom");
         let mut new_vdom = (self.view)(self.model.as_ref().unwrap());
-        if let Some(diff) = diff_vdom(&self.current_vdom, &new_vdom) {
+        let diff = diff_vdom(&self.current_vdom, &new_vdom);
+        if let Diff::Unchanged = diff {
+            log!("No change");
+        } else {
             log!("vdom diff: {:?}", diff);
             let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), Vec::new(), vec![new_vdom]);
             render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
             new_vdom = tmp_div.children.remove(0);
-        } else {
-            log!("No change");
         }
         Ok(new_vdom)
     }
@@ -148,19 +149,20 @@ pub fn run<M: Model>(
 #[derive(Debug, Clone)]
 enum Diff {
     Create,
-    Remove,
     Replace,
+    Remove,
     Update {
         text: bool,
         attrs: bool,
         children: Vec<(u32, Diff)>,
     },
+    Unchanged,
 }
 
-fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
+fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
     if current.tag != next.tag {
         // assume everything can be nuked
-        return Some(Diff::Replace);
+        return Diff::Replace;
     }
 
     let text_changed = current.text != next.text;
@@ -195,19 +197,17 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
         .zip(next.children.iter())
         .enumerate()
     {
-        if let Some(diff) = diff_vdom(old, new) {
-            child_diffs.push((ix as u32, diff))
-        }
+            child_diffs.push((ix as u32, diff_vdom(old, new)))
     }
 
     if !text_changed && !attr_changed && child_diffs.is_empty() {
-        None
+        Diff::Unchanged
     } else {
-        Some(Diff::Update {
+        Diff::Update {
             text: text_changed,
             attrs: attr_changed,
             children: child_diffs,
-        })
+        }
     }
 }
 
@@ -223,6 +223,7 @@ fn render_diff<M: Model>(
     let child_els = this_el.children();
     for &(ix, ref diff) in child_diffs {
         match diff {
+            Diff::Unchanged => (),
             Diff::Create => {
                 let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
                 this_el.append_child(&*new_el)?;
@@ -347,7 +348,7 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> M::Msg + 'static>(
 
 fn input_handler<M: Model>(
     element: &Element,
-    handler: Rc<dyn Fn(String) -> M::Msg>,
+    handler: fn(String) -> M::Msg,
 ) -> JsResult<Listener<M>> {
     let key = JsValue::from_str("value");
     let inner = move |event: DomEvent| {
@@ -361,7 +362,7 @@ fn input_handler<M: Model>(
 
 fn click_handler<M: Model>(
     element: &Element,
-    handler: Rc<dyn Fn() -> M::Msg>,
+    handler: fn() -> M::Msg,
 ) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| handler();
     event_handler::<M, _, _>(element.clone(), "click", inner)
@@ -369,8 +370,8 @@ fn click_handler<M: Model>(
 
 fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
     match event {
-        Event::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
-        Event::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
+        Event::OnClick(cb) => click_handler::<M>(&element, *cb),
+        Event::OnInput(cb) => input_handler::<M>(&element, *cb),
     }
 }
 

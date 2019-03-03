@@ -13,8 +13,8 @@ pub enum Attribute {
 }
 
 pub enum Event<M: Model> {
-    OnClick(Rc<dyn Fn() -> M::Msg>),
-    OnInput(Rc<Fn(String) -> M::Msg>),
+    OnClick(fn() -> M::Msg),
+    OnInput(fn(String) -> M::Msg),
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
@@ -53,12 +53,12 @@ attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
-pub fn on_click<M: Model>(f: impl Fn() -> M::Msg + 'static) -> Event<M> {
-    Event::OnClick(Rc::new(f))
+pub fn on_click<M: Model>(f: fn() -> M::Msg) -> Event<M> {
+    Event::OnClick(f)
 }
 
-pub fn on_input<M: Model>(f: impl Fn(String) -> M::Msg + 'static) -> Event<M> {
-    Event::OnInput(Rc::new(f))
+pub fn on_input<M: Model>(f: fn(String) -> M::Msg) -> Event<M> {
+    Event::OnInput(f)
 }
 
 pub fn class(c: impl Classify) -> Attribute {
