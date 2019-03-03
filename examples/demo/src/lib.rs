@@ -17,7 +17,7 @@ impl Default for Model {
         Model {
             select: String::new(),
             check: false,
-            input: String::new(),
+            input: "Initial".into(),
             click_ct: 0,
             list_ct: 5,
         }
@@ -39,7 +39,7 @@ impl tree::Model for Model {
 }
 
 fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
-    log!("Update: {:?}", msg);
+    log!("update model with message: {:?}", msg);
     match msg {
         Msg::Select(select) => (Model { select, ..model }, Cmd::None),
         Msg::ToggleCheck => (
@@ -49,7 +49,13 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             },
             Cmd::None,
         ),
-        Msg::Input(input) => (Model { input, ..model }, Cmd::None),
+        Msg::Input(input) => (
+            Model {
+                input: input.to_ascii_lowercase(),
+                ..model
+            },
+            Cmd::None,
+        ),
         Msg::ButtonClick => (
             Model {
                 click_ct: model.click_ct + 1,
@@ -79,7 +85,7 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
 }
 
 fn view(model: &Model) -> Html<Model> {
-    log!("view: {:?}", model);
+    log!("rendering model: {:?}", model);
     div!(
         id("my-app"),
         h1!("Tree demo"),
@@ -90,7 +96,7 @@ fn view(model: &Model) -> Html<Model> {
                 on_input(Msg::Input),
                 placeholder("placeholder")
             ),
-            p!("Boldly repeat: ", b!(model.input.clone()))
+            p!(i!("Boldly repeat: "), b!(model.input.clone()))
         ),
         div!(
             p!(class("bluesy"), "Classy!"),

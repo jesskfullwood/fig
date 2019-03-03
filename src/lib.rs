@@ -1,13 +1,13 @@
 use derive_more::Constructor;
 use std::rc::Rc;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use web_sys::{Document, Element, HtmlDivElement, HtmlElement};
+use web_sys::{Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement};
 
 use std::borrow::Cow;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
 
-use html::Attribute;
+use html::{Attribute, Event};
 
 pub mod html;
 
@@ -29,6 +29,10 @@ struct App<M: Model> {
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
     current_vdom: Html<M>,
+}
+
+thread_local! {
+    pub static APP: *mut () = std::ptr::null_mut();
 }
 
 impl<M: Model> Drop for App<M> {
@@ -74,7 +78,7 @@ impl<M: Model> App<M> {
         let mut new_vdom = (self.view)(self.model.as_ref().unwrap());
         if let Some(diff) = diff_vdom(&self.current_vdom, &new_vdom) {
             log!("vdom diff: {:?}", diff);
-            let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), vec![new_vdom]);
+            let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), Vec::new(), vec![new_vdom]);
             render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
             new_vdom = tmp_div.children.remove(0);
         } else {
@@ -83,13 +87,61 @@ impl<M: Model> App<M> {
         Ok(new_vdom)
     }
 
-    fn with(f: impl Fn(&mut Self)) {
+    fn with(f: impl FnOnce(&mut Self)) {
         APP.with(|mut ptr| {
             let ptr: *mut () = **ptr.borrow_mut();
             let ptr: *mut App<M> = ptr as *mut App<M>;
             unsafe { f(&mut *ptr) }
         })
     }
+}
+
+pub fn run<M: Model>(
+    model: M,
+    update: UpdateFn<M, M::Msg>,
+    view: ViewFn<M>,
+    target: &str,
+) -> JsResult<()> {
+    let window = web_sys::window().expect("no global `window` exists");
+    let document = window.document().expect("should have a document on window");
+    let target = document
+        .get_element_by_id(target)
+        .expect("Target element not found");
+    let target: HtmlDivElement = target.dyn_into()?;
+    let initial = document.create_element(&Tag::Div.to_string())?;
+    target.set_inner_html(""); // blank the target div and create an initial root
+    target.append_child(&*initial)?;
+    let app = App {
+        document,
+        target,
+        model: Some(model),
+        update,
+        view,
+        current_vdom: Html::tag(Tag::Div), // now the dom and vdom are in sync
+    };
+
+    // put app on the heap...
+    let app = Box::new(app);
+    // and leak it so we can put it in a thread-local
+    let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut ();
+    // super unsafe. We swap our global void pointer to point to our app.
+    // We to do it this way because it isn't possible to have
+    // generics in globals. That is, the user of the library chooses their own Model
+    // so we can't know the full type of App in advance.
+    APP.with(move |ptr| {
+        let inner = ptr as *const *mut () as *mut *mut ();
+        unsafe {
+            *inner = app_ptr;
+        }
+    });
+
+    // From this point on we only interact with App through App::with.
+    // Then it's safe, hopefully.
+    App::<M>::with(|app| {
+        // initial render
+        app.current_vdom = app.render_dom().expect("Render failed");
+    });
+    Ok(())
 }
 
 /// A tree describing which nodes have changed and how
@@ -112,14 +164,14 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Option<Diff> {
     }
 
     let text_changed = current.text != next.text;
-    let attr_changed = false; // TODO
+    let mut attr_changed = false;
 
     // TODO ordering may change?? Is it even possible to add new attrs?
-    // for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
-    //     if old_attr !=  new_attr {
-    //         // update the attribute
-    //     }
-    // }
+    for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
+        if old_attr != new_attr {
+            attr_changed = true
+        }
+    }
 
     let mut child_diffs = Vec::new();
 
@@ -195,6 +247,9 @@ fn render_diff<M: Model>(
                 if *text {
                     child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()));
                 }
+                if *attrs {
+                    child_vnode.reapply_attrs(child_el)?;
+                }
                 render_diff(&child_vnode, &*children, child_el, doc)?;
             }
         }
@@ -208,66 +263,19 @@ pub enum Cmd<Msg> {
     Fetch,
 }
 
-pub fn run<M: Model>(
-    model: M,
-    update: UpdateFn<M, M::Msg>,
-    view: ViewFn<M>,
-    target: &str,
-) -> JsResult<()> {
-    let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
-    let target = document
-        .get_element_by_id(target)
-        .expect("Target element not found");
-    let target: HtmlDivElement = target.dyn_into()?;
-    let initial = document.create_element(&Tag::Div.to_string())?;
-    target.set_inner_html(""); // blank the target div and create an initial root
-    target.append_child(&*initial)?;
-    let app = App {
-        document,
-        target,
-        model: Some(model),
-        update,
-        view,
-        current_vdom: Html::new(Tag::Div, None, Vec::new(), Vec::new()), // ^^ now the dome and vdom are in sync
-    };
-
-    // put app on the heap...
-    let app = Box::new(app);
-    // and leak it so we can put it in a thread-local
-    let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut ();
-    // super unsafe. We swap our global void pointer to point to our app.
-    // We to do it this way because it isn't possible to have
-    // generics in globals. That is, the user of the library chooses their own Model
-    // so we can't know the full type of App in advance.
-    APP.with(move |ptr| {
-        let inner = ptr as *const *mut () as *mut *mut ();
-        unsafe {
-            *inner = app_ptr;
-        }
-    });
-
-    // From this point on we only interact with App through App::with.
-    // Then it's safe, hopefully.
-    App::<M>::with(|app| {
-        // initial render
-        app.current_vdom = app.render_dom().expect("Render failed");
-    });
-    Ok(())
-}
-
 #[derive(Debug, Constructor)]
 pub struct Html<M: Model> {
     tag: Tag,
     text: Option<Str>,
-    attrs: Vec<Attribute<M>>,
+    attrs: Vec<Attribute>,
+    events: Vec<Event<M>>,
     children: Vec<Html<M>>,
 }
 
 impl<M: Model> Html<M> {
     /// Create an empty tagged element
     pub fn tag(tag: Tag) -> Html<M> {
-        Html::new(tag, None, Vec::new(), Vec::new())
+        Html::new(tag, None, Vec::new(), Vec::new(), Vec::new())
     }
 }
 
@@ -284,64 +292,103 @@ impl<M: Model> std::fmt::Display for Html<M> {
     }
 }
 
-thread_local! {
-    pub static APP: *mut () = std::ptr::null_mut();
+pub struct Listener<M: Model> {
+    closure: Closure<FnMut(DomEvent)>,
+    marker: std::marker::PhantomData<M>,
 }
 
-fn input_handler<M: Model>(element: &Element, cb: Rc<dyn Fn(String) -> M::Msg>) -> JsResult<()> {
-    log!("New input closure");
-    let key = JsValue::from_str("value");
-    let closure = Closure::wrap(Box::new(move |event: web_sys::InputEvent| {
-        log!("Call input handler");
-        App::<M>::with(|app| {
-            web_sys::console::time();
-            let target: web_sys::EventTarget = event.target().expect("Missing target");
-            let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
-            if let Ok(val) = js_sys::Reflect::get(target_el, &key) {
-                let cmd = Cmd::Msg(cb(val.as_string().expect("value not a string")));
-                app.loop_update(cmd).expect("Closure error");
-            } else {
-                log!("Element does not have a 'value' attribute")
-            }
-            web_sys::console::time_end();
-        });
-    }) as Box<FnMut(web_sys::InputEvent)>);
-    element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
-    closure.forget();
-    Ok(())
+impl<M: Model> Debug for Listener<M> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Listener")
+    }
 }
 
-fn click_handler<M: Model>(element: &Element, cb: Rc<dyn Fn() -> M::Msg>) -> JsResult<()> {
-    log!("New click closure");
-    let closure = Closure::wrap(Box::new(move || {
-        log!("Call click handler");
+impl<M: Model> Listener<M> {
+    fn new(closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
+        Listener {
+            closure,
+            marker: std::marker::PhantomData,
+        }
+    }
+}
+
+fn event_handler<M: Model, F: Fn(DomEvent) -> M::Msg + 'static>(
+    element: &Element,
+    handler: F,
+    event_name: &str,
+) -> JsResult<Listener<M>> {
+    log!("New event hander closure");
+    let closure = Closure::wrap(Box::new(move |event: DomEvent| {
         web_sys::console::time();
-        App::<M>::with(|app| {
-            let cmd = Cmd::Msg(cb());
-            app.loop_update(cmd).expect("Closure error")
+        let cmd = Cmd::Msg(handler(event));
+        App::<M>::with(move |app| {
+            app.loop_update(cmd).expect("Update error");
         });
         web_sys::console::time_end();
-    }) as Box<FnMut()>);
-    element.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
-    closure.forget();
+    }) as Box<FnMut(DomEvent)>);
+    element.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
+    Ok(Listener::new(closure))
+}
+
+fn input_handler<M: Model>(
+    element: &Element,
+    handler: Rc<dyn Fn(String) -> M::Msg>,
+) -> JsResult<Listener<M>> {
+    let key = JsValue::from_str("value");
+    let inner = move |event: DomEvent| {
+        let target: web_sys::EventTarget = event.target().expect("Missing target");
+        let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
+        let val = js_sys::Reflect::get(target_el, &key).expect("Failed to get property");
+        handler(val.as_string().expect("value not a string"))
+    };
+    event_handler::<M, _>(element, inner, "input")
+}
+
+fn click_handler<M: Model>(
+    element: &Element,
+    handler: Rc<dyn Fn() -> M::Msg>,
+) -> JsResult<Listener<M>> {
+    let inner = move |_event: DomEvent| handler();
+    event_handler::<M, _>(element, inner, "click")
+}
+
+fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
+    match event {
+        Event::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
+        Event::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
+    }
+}
+
+fn apply_attr_to_elem(attr: &Attribute, element: &Element) -> JsResult<()> {
+    use Attribute::*;
+    match attr {
+        Value(val) => element.set_attribute("value", val)?,
+        Placeholder(val) => element.set_attribute("placeholder", val)?,
+        Id(val) => element.set_attribute("id", val)?,
+        Class(classes) => element.set_attribute("class", &classes.join(" "))?,
+        Style(style) => (),
+    };
     Ok(())
 }
 
 impl<M: Model> Html<M> {
+    fn apply_attrs(&self, element: &Element) -> JsResult<()> {
+        for attr in &self.attrs {
+            apply_attr_to_elem(attr, element)?
+        }
+        Ok(())
+    }
+
+    fn reapply_attrs(&self, element: &Element) -> JsResult<()> {
+        for attr in &self.attrs {
+            apply_attr_to_elem(attr, element)?
+        }
+        Ok(())
+    }
+
     fn render(&self, document: &Document) -> JsResult<Element> {
         let element = document.create_element(&self.tag.to_string())?;
-        for attr in &self.attrs {
-            use Attribute::*;
-            match attr {
-                Value(val) => element.set_attribute("value", val)?,
-                Placeholder(val) => element.set_attribute("placeholder", val)?,
-                Id(val) => element.set_attribute("id", val)?,
-                OnClick(cb) => click_handler::<M>(&element, cb.clone())?,
-                OnInput(cb) => input_handler::<M>(&element, cb.clone())?,
-                Class(classes) => element.set_attribute("class", &classes.join(" "))?,
-                Style(style) => (),
-            }
-        }
+        self.apply_attrs(&element)?;
         if let Some(text) = &self.text {
             element.set_text_content(Some(text.borrow()))
         }
@@ -430,15 +477,15 @@ impl Stringify for String {
     }
 }
 
-pub trait ToAttr<M: Model>: Sized {
-    fn into_attrs(self) -> Vec<Attribute<M>>;
+pub trait ToAttr: Sized {
+    fn into_attrs(self) -> Vec<Attribute>;
 }
 
 macro_rules! impl_to_attrs {
     ($($param:tt),*) => {
         #[allow(non_snake_case, unused_parens)]
-        impl<M: Model, $($param: Into<Attribute<M>>),*> ToAttr<M> for ($($param),*) {
-            fn into_attrs(self) -> Vec<Attribute<M>> {
+        impl<$($param: Into<Attribute>),*> ToAttr for ($($param),*) {
+            fn into_attrs(self) -> Vec<Attribute> {
                 let ($($param),*) = self;
                 vec![$($param.into()),*]
             }
@@ -489,6 +536,9 @@ impl_to_html!(A, B, C, D, E, F);
 impl_to_html!(A, B, C, D, E, F, G);
 impl_to_html!(A, B, C, D, E, F, G, H);
 impl_to_html!(A, B, C, D, E, F, G, H, I);
+impl_to_html!(A, B, C, D, E, F, G, H, I, J);
+impl_to_html!(A, B, C, D, E, F, G, H, I, J, K);
+impl_to_html!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 #[macro_export]
 macro_rules! log {
