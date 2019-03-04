@@ -163,6 +163,7 @@ enum Diff {
     Update {
         text: bool,
         attrs: bool,
+        events: bool,
         children: Vec<(u32, Diff)>,
     },
     Unchanged,
@@ -175,20 +176,33 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
     }
 
     let text_changed = current.text != next.text;
-    let mut attr_changed = false;
+    let mut attrs_changed = false;
 
     // TODO ordering may change?? Is it even possible to add new attrs?
     for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
         if old_attr != new_attr {
-            attr_changed = true
+            attrs_changed = true
         }
     }
 
     for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
         if old_attr != new_attr {
-            attr_changed = true
+            attrs_changed = true
         }
     }
+
+    let events_changed = next
+        .events
+        .iter()
+        .filter(|ev| {
+            if let Event::Unchanged = ev {
+                false
+            } else {
+                true
+            }
+        })
+        .count()
+        > 0;
 
     let mut child_diffs = Vec::new();
 
@@ -215,12 +229,13 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
         child_diffs.push((ix as u32, diff_vdom(old, new)))
     }
 
-    if !text_changed && !attr_changed && child_diffs.is_empty() {
+    if !text_changed && !attrs_changed && !events_changed && child_diffs.is_empty() {
         Diff::Unchanged
     } else {
         Diff::Update {
             text: text_changed,
-            attrs: attr_changed,
+            attrs: attrs_changed,
+            events: events_changed,
             children: child_diffs,
         }
     }
@@ -255,6 +270,7 @@ fn render_diff<M: Model>(
             Diff::Update {
                 text,
                 attrs,
+                events,
                 children,
             } => {
                 let child_vnode = &this_vnode.children[ix as usize];
@@ -308,17 +324,8 @@ impl<M: Model> std::fmt::Display for Html<M> {
     }
 }
 
-// impl<M: Model> Html<M> {
-//     /// And `eq` implementation that ignores child nodes.
-//     /// Useful for diffing
-//     fn internals_are_eq(&self, other: &Self) -> bool {
-//         self.tag == other.tag
-//             && self.attrs == other.attrs
-//             && self.text == other.text
-//             && self.events == other.events
-//     }
-// }
-
+/// Represents a listener attached to the DOM.
+/// When it is dropped it will detach the corresponding listener.
 pub struct Listener<M: Model> {
     element: Element,
     type_: Str,

@@ -1,5 +1,4 @@
-use closures::{Closure, Closure1};
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -49,14 +48,14 @@ attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
 macro_rules! closure_handler {
-    ($func_name:ident, $macro_name:ident, $functy:ty, $closure:ident, $closurety:ty, $event:ident) => {
+    ($func_name:ident, $macro_name:ident, $functy:ty, $closurety:ty, $event:ident) => {
         #[doc(hidden)]
         pub fn $func_name<M: Model, S: PartialEq + Clone + 'static>(
             state: S,
             f: $functy,
             callsite_id: u32,
         ) -> Event<M> {
-            let cl = $closure::new(state, f);
+            let cl = <$closurety>::new(state, f);
             EVENT_MAP.with(|map| {
                 let mut map = map.borrow_mut();
                 let previous: Option<&Box<Any>> = map.get(&callsite_id);
@@ -76,6 +75,9 @@ macro_rules! closure_handler {
         #[macro_export]
         macro_rules! $macro_name {
             ($state:expr, $closure2:expr) => {
+                // XXX using line! is a total hack and will break in mysterious ways
+                // e.g. if two invocations in different files are on the same line count.
+                // How else to get unique callsite id?
                 $crate::html::$func_name($state, $closure2, line!())
             };
             ($closure2:expr) => {
@@ -89,16 +91,14 @@ closure_handler!(
     __on_click,
     on_click,
     fn(&S) -> M::Msg,
-    Closure,
-    Closure<_, _>,
+    closures::Closure<_, _>,
     OnClick
 );
 closure_handler!(
     __on_input,
     on_input,
     fn(&S, String) -> M::Msg,
-    Closure1,
-    Closure1<_, _, _>,
+    closures::Closure1<_, _, _>,
     OnInput
 );
 
