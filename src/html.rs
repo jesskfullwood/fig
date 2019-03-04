@@ -1,6 +1,11 @@
+use closures::Closure;
+use std::any::{Any, TypeId};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
-use crate::{Html, Listener, Model, Str};
+use crate::{log, Html, Listener, Model, Str};
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute {
@@ -11,21 +16,14 @@ pub enum Attribute {
     Style(Style),
 }
 
-#[derive(Clone, Hash)]
 pub enum Event<M: Model> {
-    OnClick(fn() -> M::Msg),
-    OnInput(fn(String) -> M::Msg),
+    OnClick(Rc<dyn Fn() -> M::Msg>),
+    OnInput(Rc<dyn Fn(String) -> M::Msg>),
+    Unchanged,
 }
 
-impl<M: Model> PartialEq for Event<M> {
-    fn eq(&self, other: &Self) -> bool {
-        use Event::*;
-        match (self, other) {
-            (OnClick(f1), OnClick(f2)) => f1 == f2,
-            (OnInput(f1), OnInput(f2)) => f1 == f2,
-            _ => false,
-        }
-    }
+thread_local! {
+    static EVENT_MAP: RefCell<HashMap<u32, Box<dyn Any>>> = RefCell::new(HashMap::new());
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
@@ -33,23 +31,10 @@ impl<M: Model> fmt::Debug for Event<M> {
         match self {
             Event::OnClick(ptr) => write!(f, "Event(OnClick({:p})", ptr),
             Event::OnInput(ptr) => write!(f, "Event(OnInput({:p})", ptr),
+            Event::Unchanged => write!(f, "Event(Unchanged)"),
         }
     }
 }
-
-// impl PartialEq for Attribute {
-//     fn eq(&self, other: &Self) -> bool {
-//         use Attribute::*;
-//         match (self, other) {
-//             (Value(l), Value(r)) => { crate::log!("{} == {}?", l, r);l == r}
-//             (Placeholder(l), Placeholder(r)) => l == r,
-//             (Class(l), Class(r)) => l == r,
-//             (Id(l), Id(r)) => l == r,
-//             (Style(l), Style(r)) => l == r,
-//             _different => false
-//         }
-//     }
-// }
 
 macro_rules! attr_key_value {
     ($func_name: ident, $tag: ident) => {
@@ -63,12 +48,49 @@ attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
-pub fn on_click<M: Model>(f: fn() -> M::Msg) -> Event<M> {
-    Event::OnClick(f)
+#[macro_export]
+macro_rules! on_click {
+    ($state:expr, $closure:expr) => {
+        $crate::html::__on_click($state, $closure, line!())
+    };
+    ($closure:expr) => {
+        $crate::html::__on_click((), $closure, line!())
+    };
 }
 
-pub fn on_input<M: Model>(f: fn(String) -> M::Msg) -> Event<M> {
-    Event::OnInput(f)
+#[doc(hidden)]
+pub fn __on_click<S: PartialEq + Clone + 'static, M: Model>(
+    state: S,
+    f: fn(&S) -> M::Msg,
+    callsite_id: u32,
+) -> Event<M> {
+    log!("On-Click closure");
+    let cl = Closure::new(state, f);
+    EVENT_MAP.with(|map| {
+        log!("In map");
+        let mut map = map.borrow_mut();
+        let previous: Option<&Box<Any>> = map.get(&callsite_id);
+        if previous.is_some() {
+            log!("previous found")
+        } else {
+            log!("previous not found")
+        };
+        if let Some(prev) = previous.and_then(|any| any.downcast_ref::<Rc<Closure<_, _>>>()) {
+            if &cl == prev.as_ref() {
+                // Short-circuit the happy path
+                log!("On-Click closure unchanged");
+                return Event::Unchanged;
+            }
+        };
+        let cl = Rc::new(cl);
+        map.insert(callsite_id, Box::new(cl.clone()) as Box<dyn Any>);
+        Event::OnClick(cl)
+    })
+}
+
+pub fn on_input<M: Model>(f: impl Fn(String) -> M::Msg + 'static) -> Event<M> {
+    unimplemented!()
+    // Event::OnInput(Box::new(f))
 }
 
 pub fn class(c: impl Classify) -> Attribute {

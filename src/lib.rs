@@ -6,6 +6,7 @@ use web_sys::{Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement}
 use std::borrow::Cow;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
+use std::rc::Rc;
 
 use html::{Attribute, Event};
 
@@ -307,16 +308,16 @@ impl<M: Model> std::fmt::Display for Html<M> {
     }
 }
 
-impl<M: Model> Html<M> {
-    /// And `eq` implementation that ignores child nodes.
-    /// Useful for diffing
-    fn internals_are_eq(&self, other: &Self) -> bool {
-        self.tag == other.tag
-            && self.attrs == other.attrs
-            && self.text == other.text
-            && self.events == other.events
-    }
-}
+// impl<M: Model> Html<M> {
+//     /// And `eq` implementation that ignores child nodes.
+//     /// Useful for diffing
+//     fn internals_are_eq(&self, other: &Self) -> bool {
+//         self.tag == other.tag
+//             && self.attrs == other.attrs
+//             && self.text == other.text
+//             && self.events == other.events
+//     }
+// }
 
 pub struct Listener<M: Model> {
     element: Element,
@@ -373,7 +374,7 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> M::Msg + 'static>(
 
 fn input_handler<M: Model>(
     element: &Element,
-    handler: fn(String) -> M::Msg,
+    handler: Rc<dyn Fn(String) -> M::Msg>,
 ) -> JsResult<Listener<M>> {
     let key = JsValue::from_str("value");
     let inner = move |event: DomEvent| {
@@ -385,15 +386,19 @@ fn input_handler<M: Model>(
     event_handler::<M, _, _>(element.clone(), "input", inner)
 }
 
-fn click_handler<M: Model>(element: &Element, handler: fn() -> M::Msg) -> JsResult<Listener<M>> {
+fn click_handler<M: Model>(
+    element: &Element,
+    handler: Rc<dyn Fn() -> M::Msg>,
+) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| handler();
     event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
 fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
     match event {
-        Event::OnClick(cb) => click_handler::<M>(&element, *cb),
-        Event::OnInput(cb) => input_handler::<M>(&element, *cb),
+        Event::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
+        Event::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
+        Event::Unchanged => unreachable!("Unchanged event shall not be attached to DOM"),
     }
 }
 

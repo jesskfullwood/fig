@@ -1,10 +1,10 @@
-use tree::html::*;
+use futures::Future;
+use serde::{Deserialize, Serialize};
 use tree::fetch;
+use tree::html::*;
 use tree::select;
 use tree::*;
-use serde::{Serialize, Deserialize};
 use wasm_bindgen::prelude::*;
-use futures::{Future};
 
 #[derive(Debug, Clone)]
 struct Model {
@@ -13,7 +13,7 @@ struct Model {
     input: String,
     click_ct: u32,
     list_ct: u32,
-    server_says: Option<String>
+    server_says: Option<String>,
 }
 
 impl Default for Model {
@@ -24,7 +24,7 @@ impl Default for Model {
             input: "Initial".into(),
             click_ct: 0,
             list_ct: 5,
-            server_says: None
+            server_says: None,
         }
     }
 }
@@ -38,12 +38,12 @@ enum Msg {
     AddLi,
     RmLi,
     FetchSelected(String),
-    FetchedSelected(String)
+    FetchedSelected(String),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Data {
-    data: String
+    data: String,
 }
 
 impl tree::Model for Model {
@@ -55,7 +55,13 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     match msg {
         Msg::Select(select) => (Model { select, ..model }, Cmd::None),
         Msg::FetchSelected(val) => (model, Cmd::Fetch(Box::new(fetch_selected(val)))),
-        Msg::FetchedSelected(val) => (Model {server_says: Some(val), ..model}, Cmd::None),
+        Msg::FetchedSelected(val) => (
+            Model {
+                server_says: Some(val),
+                ..model
+            },
+            Cmd::None,
+        ),
         Msg::ToggleCheck => (
             Model {
                 check: !model.check,
@@ -115,7 +121,7 @@ fn view(model: &Model) -> Html<Model> {
         div!(
             input!(
                 value(model.input.clone()),
-                on_input(Msg::Input),
+                // on_input(Msg::Input),
                 placeholder("placeholder")
             ),
             p!(i!("Boldly repeat: "), b!(model.input.clone()))
@@ -123,23 +129,19 @@ fn view(model: &Model) -> Html<Model> {
         div!(
             p!(class("bluesy"), "Classy!"),
             button!(
-                on_click(|| Msg::ButtonClick),
+                on_click!((), |()| Msg::ButtonClick),
                 format!("Clicked: {}", model.click_ct),
             ),
             select!(
-                on_input(Msg::Select),
+                // on_input(Msg::Select),
                 option!(value("a"), "this"),
                 option!(value("b"), "that"),
                 option!(value("c"), "other"),
             ),
-            button!(
-                on_click(|| Msg::FetchSelected(model.select)),
-                "Send request"
-            ),
-
+            button!(on_click!(model.select.clone(), |select| Msg::FetchSelected(select.clone())), "Send request"),
         ),
-        button!(on_click(|| Msg::AddLi), "+ item"),
-        button!(on_click(|| Msg::RmLi), "- item"),
+        button!(on_click!(|()| Msg::AddLi), "+ item"),
+        button!(on_click!(|()| Msg::RmLi), "- item"),
         ul!((0..model.list_ct)
             .map(|i| li!(format!("List item {}", i)))
             .collect::<Vec<_>>()),
