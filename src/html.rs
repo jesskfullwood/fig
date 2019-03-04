@@ -12,10 +12,21 @@ pub enum Attribute {
     Style(Style),
 }
 
-#[derive(Clone, PartialEq, Hash)]
+#[derive(Clone, Hash)]
 pub enum Event<M: Model> {
     OnClick(fn() -> M::Msg),
     OnInput(fn(String) -> M::Msg),
+}
+
+impl<M: Model> PartialEq for Event<M> {
+    fn eq(&self, other: &Self) -> bool {
+        use Event::*;
+        match (self, other) {
+            (OnClick(f1), OnClick(f2)) => f1 == f2,
+            (OnInput(f1), OnInput(f2)) => f1 == f2,
+            _ => false
+        }
+    }
 }
 
 impl<M: Model> fmt::Debug for Event<M> {

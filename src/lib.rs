@@ -10,7 +10,7 @@ use std::fmt::{self, Debug};
 use html::{Attribute, Event};
 
 pub mod html;
-pub mod diff;
+// pub mod diff;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
@@ -104,6 +104,7 @@ pub fn run<M: Model>(
     view: ViewFn<M>,
     target: &str,
 ) -> JsResult<()> {
+    console_error_panic_hook::set_once();
     let window = web_sys::window().expect("no global `window` exists");
     let document = window.document().expect("should have a document on window");
     let target = document
@@ -297,6 +298,17 @@ impl<M: Model> std::fmt::Display for Html<M> {
             write!(f, "{}", c)?;
         }
         write!(f, "</{}>", self.tag)
+    }
+}
+
+impl<M: Model> Html<M> {
+    /// And `eq` implementation that ignores child nodes.
+    /// Useful for diffing
+    fn internals_are_eq(&self, other: &Self) -> bool {
+        self.tag == other.tag
+            && self.attrs == other.attrs
+            && self.text == other.text
+            && self.events == other.events
     }
 }
 
