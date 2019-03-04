@@ -1,7 +1,10 @@
 use tree::html::*;
+use tree::fetch;
 use tree::select;
 use tree::*;
+use serde::{Serialize, Deserialize};
 use wasm_bindgen::prelude::*;
+use futures::{Future};
 
 #[derive(Debug, Clone)]
 struct Model {
@@ -10,6 +13,7 @@ struct Model {
     input: String,
     click_ct: u32,
     list_ct: u32,
+    server_says: Option<String>
 }
 
 impl Default for Model {
@@ -20,6 +24,7 @@ impl Default for Model {
             input: "Initial".into(),
             click_ct: 0,
             list_ct: 5,
+            server_says: None
         }
     }
 }
@@ -32,6 +37,13 @@ enum Msg {
     ButtonClick,
     AddLi,
     RmLi,
+    FetchSelected(String),
+    FetchedSelected(String)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Data {
+    data: String
 }
 
 impl tree::Model for Model {
@@ -42,6 +54,8 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     log!("update model with message: {:?}", msg);
     match msg {
         Msg::Select(select) => (Model { select, ..model }, Cmd::None),
+        Msg::FetchSelected(val) => (model, Cmd::Fetch(Box::new(fetch_selected(val)))),
+        Msg::FetchedSelected(val) => (Model {server_says: Some(val), ..model}, Cmd::None),
         Msg::ToggleCheck => (
             Model {
                 check: !model.check,
@@ -84,6 +98,14 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     }
 }
 
+fn fetch_selected(val: String) -> impl Future<Item = Msg, Error = JsValue> {
+    fetch::Request::new("http://localhost:8001")
+        .method(fetch::Method::Post)
+        .body_json(&Data { data: val })
+        .fetch_json()
+        .map(|data: Data| Msg::FetchedSelected(data.data))
+}
+
 fn view(model: &Model) -> Html<Model> {
     log!("rendering model: {:?}", model);
     div!(
@@ -106,10 +128,15 @@ fn view(model: &Model) -> Html<Model> {
             ),
             select!(
                 on_input(Msg::Select),
-                option!(value("a"), "a"),
-                option!(value("b"), "b"),
-                option!(value("c"), "c"),
+                option!(value("a"), "this"),
+                option!(value("b"), "that"),
+                option!(value("c"), "other"),
             ),
+            button!(
+                on_click(|| Msg::FetchSelected(model.select)),
+                "Send request"
+            ),
+
         ),
         button!(on_click(|| Msg::AddLi), "+ item"),
         button!(on_click(|| Msg::RmLi), "- item"),

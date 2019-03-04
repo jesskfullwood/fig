@@ -1,7 +1,6 @@
 use std::fmt;
-use std::rc::Rc;
 
-use crate::{Html, Model, Str, Listener};
+use crate::{Html, Listener, Model, Str};
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute {
@@ -24,7 +23,7 @@ impl<M: Model> PartialEq for Event<M> {
         match (self, other) {
             (OnClick(f1), OnClick(f2)) => f1 == f2,
             (OnInput(f1), OnInput(f2)) => f1 == f2,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -37,7 +36,6 @@ impl<M: Model> fmt::Debug for Event<M> {
         }
     }
 }
-
 
 // impl PartialEq for Attribute {
 //     fn eq(&self, other: &Self) -> bool {

@@ -1,5 +1,5 @@
 use derive_more::Constructor;
-use std::rc::Rc;
+use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement};
 
@@ -9,6 +9,7 @@ use std::fmt::{self, Debug};
 
 use html::{Attribute, Event};
 
+pub mod fetch;
 pub mod html;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
@@ -55,12 +56,18 @@ impl<M: Model> App<M> {
             log!("Loop update (ct: {})", loopct);
             match cmd {
                 Cmd::None => break,
-                Cmd::Fetch => unimplemented!(),
                 Cmd::Msg(msg) => {
                     let model = self.model.take().unwrap();
                     let (new_model, new_cmd) = (self.update)(msg, model);
                     self.model.replace(new_model);
                     cmd = new_cmd; // we go again
+                }
+                Cmd::Fetch(request) => {
+                    let fut = request.map(|msg: M::Msg| {
+                        App::<M>::with(|app| app.loop_update(Cmd::Msg(msg)).expect("update failed"))
+                    });
+                    fetch::spawn_local(fut);
+                    break;
                 }
             }
             if loopct > 100 {
@@ -204,7 +211,7 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
         .zip(next.children.iter())
         .enumerate()
     {
-            child_diffs.push((ix as u32, diff_vdom(old, new)))
+        child_diffs.push((ix as u32, diff_vdom(old, new)))
     }
 
     if !text_changed && !attr_changed && child_diffs.is_empty() {
@@ -268,7 +275,7 @@ fn render_diff<M: Model>(
 pub enum Cmd<Msg> {
     None,
     Msg(Msg),
-    Fetch,
+    Fetch(Box<Future<Item = Msg, Error = JsValue>>),
 }
 
 #[derive(Debug, Constructor)]
@@ -378,10 +385,7 @@ fn input_handler<M: Model>(
     event_handler::<M, _, _>(element.clone(), "input", inner)
 }
 
-fn click_handler<M: Model>(
-    element: &Element,
-    handler: fn() -> M::Msg,
-) -> JsResult<Listener<M>> {
+fn click_handler<M: Model>(element: &Element, handler: fn() -> M::Msg) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| handler();
     event_handler::<M, _, _>(element.clone(), "click", inner)
 }
