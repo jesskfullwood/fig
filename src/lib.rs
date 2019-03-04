@@ -10,7 +10,6 @@ use std::fmt::{self, Debug};
 use html::{Attribute, Event};
 
 pub mod html;
-// pub mod diff;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
