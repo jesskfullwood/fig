@@ -105,8 +105,10 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
 }
 
 fn fetch_selected(val: String) -> impl Future<Item = Msg, Error = JsValue> {
+    log!("Fetch: '{}'", val);
     fetch::Request::new("http://localhost:8001")
         .method(fetch::Method::Post)
+        .header("Content-Type", "application/json")
         .body_json(&Data { data: val })
         .fetch_json()
         .map(|data: Data| Msg::FetchedSelected(data.data))
@@ -129,16 +131,24 @@ fn view(model: &Model) -> Html<Model> {
         div!(
             p!(class("bluesy"), "Classy!"),
             button!(
-                on_click!((), |()| Msg::ButtonClick),
+                on_click!(|()| Msg::ButtonClick),
                 format!("Clicked: {}", model.click_ct),
             ),
             select!(
-                // on_input(Msg::Select),
-                option!(value("a"), "this"),
-                option!(value("b"), "that"),
-                option!(value("c"), "other"),
+                on_input!(|(), sel| Msg::Select(sel)),
+                option!(value("this"), "this"),
+                option!(value("that"), "that"),
+                option!(value("other"), "other"),
             ),
             button!(on_click!(model.select.clone(), |select| Msg::FetchSelected(select.clone())), "Send request"),
+            p!({
+                let says = if let Some(ref says) = model.server_says {
+                    says
+                } else {
+                    "Nothing!"
+                };
+                format!("Our server says: {}", says)
+            })
         ),
         button!(on_click!(|()| Msg::AddLi), "+ item"),
         button!(on_click!(|()| Msg::RmLi), "- item"),

@@ -1,4 +1,4 @@
-use closures::Closure;
+use closures::{Closure, Closure1};
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -48,50 +48,59 @@ attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 
-#[macro_export]
-macro_rules! on_click {
-    ($state:expr, $closure:expr) => {
-        $crate::html::__on_click($state, $closure, line!())
-    };
-    ($closure:expr) => {
-        $crate::html::__on_click((), $closure, line!())
+macro_rules! closure_handler {
+    ($func_name:ident, $macro_name:ident, $functy:ty, $closure:ident, $closurety:ty, $event:ident) => {
+        #[doc(hidden)]
+        pub fn $func_name<M: Model, S: PartialEq + Clone + 'static>(
+            state: S,
+            f: $functy,
+            callsite_id: u32,
+        ) -> Event<M> {
+            let cl = $closure::new(state, f);
+            EVENT_MAP.with(|map| {
+                let mut map = map.borrow_mut();
+                let previous: Option<&Box<Any>> = map.get(&callsite_id);
+                if let Some(prev) = previous.and_then(|any| any.downcast_ref::<Rc<$closurety>>()) {
+                    if &cl == prev.as_ref() {
+                        // Short-circuit the happy path
+                        return Event::Unchanged;
+                    }
+                };
+                log!("Closure @{} **changed**", callsite_id);
+                let cl = Rc::new(cl);
+                map.insert(callsite_id, Box::new(cl.clone()) as Box<dyn Any>);
+                Event::$event(cl)
+            })
+        }
+
+        #[macro_export]
+        macro_rules! $macro_name {
+            ($state:expr, $closure2:expr) => {
+                $crate::html::$func_name($state, $closure2, line!())
+            };
+            ($closure2:expr) => {
+                $crate::html::$func_name((), $closure2, line!())
+            };
+        }
     };
 }
 
-#[doc(hidden)]
-pub fn __on_click<S: PartialEq + Clone + 'static, M: Model>(
-    state: S,
-    f: fn(&S) -> M::Msg,
-    callsite_id: u32,
-) -> Event<M> {
-    log!("On-Click closure");
-    let cl = Closure::new(state, f);
-    EVENT_MAP.with(|map| {
-        log!("In map");
-        let mut map = map.borrow_mut();
-        let previous: Option<&Box<Any>> = map.get(&callsite_id);
-        if previous.is_some() {
-            log!("previous found")
-        } else {
-            log!("previous not found")
-        };
-        if let Some(prev) = previous.and_then(|any| any.downcast_ref::<Rc<Closure<_, _>>>()) {
-            if &cl == prev.as_ref() {
-                // Short-circuit the happy path
-                log!("On-Click closure unchanged");
-                return Event::Unchanged;
-            }
-        };
-        let cl = Rc::new(cl);
-        map.insert(callsite_id, Box::new(cl.clone()) as Box<dyn Any>);
-        Event::OnClick(cl)
-    })
-}
-
-pub fn on_input<M: Model>(f: impl Fn(String) -> M::Msg + 'static) -> Event<M> {
-    unimplemented!()
-    // Event::OnInput(Box::new(f))
-}
+closure_handler!(
+    __on_click,
+    on_click,
+    fn(&S) -> M::Msg,
+    Closure,
+    Closure<_, _>,
+    OnClick
+);
+closure_handler!(
+    __on_input,
+    on_input,
+    fn(&S, String) -> M::Msg,
+    Closure1,
+    Closure1<_, _, _>,
+    OnInput
+);
 
 pub fn class(c: impl Classify) -> Attribute {
     Attribute::Class(c.classify())
