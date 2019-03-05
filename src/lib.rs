@@ -10,7 +10,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use html::{Attribute, Event};
+use html::{Attribute, Event, Tag};
 
 pub mod fetch;
 pub mod html;
@@ -41,7 +41,6 @@ fn intercept_links<M: Model>(
 ) -> JsResult<Listener<M>> {
     log!("Intercepting links");
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
-        log!("Links handler callback");
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &Element = target.dyn_ref().expect("Not an Element");
         if target_el.tag_name() != "A" {
@@ -364,12 +363,14 @@ fn render_diff<M: Model>(
                 this_el.append_child(&*new_el)?;
             }
             Diff::Replace => {
-                let old_el = child_els.get_with_index(ix).expect("bad node index");
+                let old_el = child_els
+                    .get_with_index(ix)
+                    .expect("bad replace node index");
                 let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
                 this_el.replace_child(&*new_el, &old_el)?;
             }
             Diff::Remove => {
-                let old_el = child_els.get_with_index(ix).expect("bad node index");
+                let old_el = child_els.get_with_index(ix).expect("bad remove node index");
                 this_el.remove_child(&old_el)?;
             }
             Diff::Update {
@@ -405,6 +406,7 @@ pub enum Cmd<Msg> {
 }
 
 #[derive(Debug, Constructor)]
+/// Represents an HTML node
 pub struct Html<M: Model> {
     tag: Tag,
     text: Option<Str>,
@@ -476,7 +478,6 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'stati
     let event_name = event_name.into();
     log!("New event hander closure");
     let closure = Closure::wrap(Box::new(move |event: DomEvent| {
-        log!("Hello closure");
         web_sys::console::time();
         let cmd = handler(event);
         App::<M>::with(move |app| {
@@ -582,150 +583,4 @@ impl<M: Model> Html<M> {
         }
         Ok(element)
     }
-}
-
-macro_rules! make_tags {
-    ($d:tt, $($typ:ident => $text:ident),* $(,)?) => {
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub enum Tag {
-            $($typ,)*
-        }
-
-        impl std::fmt::Display for Tag {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                use Tag::*;
-                let tag = match self {
-                    $($typ => stringify!($text),)*
-                };
-                write!(f, "{}", tag)
-            }
-        }
-
-        $(
-            #[macro_export]
-            macro_rules! $text {
-                ($d($modifier:expr),* $d(,)?) => {
-                    {
-                        use $crate::{Html, Tag, html::ElemMod};
-                        let mut html = Html::tag(Tag::$typ);
-                        $d($modifier.modify_element(&mut html);)*;
-                        html
-                    }
-                }
-            }
-        )*
-    }
-}
-
-// Why do we pass in the weird'$' symbol? Workaround for macro_rules bug - see
-// https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
-make_tags! {
-    $,
-    A => a,
-    B => b,
-    Button => button,
-    Div => div,
-    Em => em,
-    H1 => h1,
-    H2 => h2,
-    H3 => h3,
-    H4 => h4,
-    I => i,
-    Input => input,
-    Li => li,
-    Option => option,
-    P => p,
-    Select => select,
-    Span => span,
-    Ul => ul
-}
-
-pub trait Stringify {
-    fn stringify(self) -> Option<Str>;
-}
-
-impl Stringify for () {
-    fn stringify(self) -> Option<Str> {
-        None
-    }
-}
-
-impl Stringify for &'static str {
-    fn stringify(self) -> Option<Str> {
-        Some(self.into())
-    }
-}
-
-impl Stringify for String {
-    fn stringify(self) -> Option<Str> {
-        Some(self.into())
-    }
-}
-
-pub trait ToAttr: Sized {
-    fn into_attrs(self) -> Vec<Attribute>;
-}
-
-macro_rules! impl_to_attrs {
-    ($($param:tt),*) => {
-        #[allow(non_snake_case, unused_parens)]
-        impl<$($param: Into<Attribute>),*> ToAttr for ($($param),*) {
-            fn into_attrs(self) -> Vec<Attribute> {
-                let ($($param),*) = self;
-                vec![$($param.into()),*]
-            }
-        }
-    }
-}
-
-impl_to_attrs!();
-impl_to_attrs!(A);
-impl_to_attrs!(A, B);
-impl_to_attrs!(A, B, C);
-impl_to_attrs!(A, B, C, D);
-impl_to_attrs!(A, B, C, D, E);
-impl_to_attrs!(A, B, C, D, E, F);
-impl_to_attrs!(A, B, C, D, E, F, G);
-impl_to_attrs!(A, B, C, D, E, F, G, H);
-impl_to_attrs!(A, B, C, D, E, F, G, H, I);
-
-pub trait ToHtml<M: Model>: Sized {
-    fn into_html(self) -> Vec<Html<M>>;
-}
-
-impl<M: Model, I: Into<Html<M>>> ToHtml<M> for Vec<I> {
-    fn into_html(self) -> Vec<Html<M>> {
-        self.into_iter().map(Into::into).collect()
-    }
-}
-
-macro_rules! impl_to_html {
-    ($($param:tt),*) => {
-        #[allow(non_snake_case, unused_parens)]
-        impl<M: Model, $($param: Into<Html<M>>),*> ToHtml<M> for ($($param),*) {
-            fn into_html(self) -> Vec<Html<M>> {
-                let ($($param),*) = self;
-                vec![$($param.into()),*]
-            }
-        }
-    }
-}
-
-impl_to_html!();
-impl_to_html!(A);
-impl_to_html!(A, B);
-impl_to_html!(A, B, C);
-impl_to_html!(A, B, C, D);
-impl_to_html!(A, B, C, D, E);
-impl_to_html!(A, B, C, D, E, F);
-impl_to_html!(A, B, C, D, E, F, G);
-impl_to_html!(A, B, C, D, E, F, G, H);
-impl_to_html!(A, B, C, D, E, F, G, H, I);
-impl_to_html!(A, B, C, D, E, F, G, H, I, J);
-impl_to_html!(A, B, C, D, E, F, G, H, I, J, K);
-impl_to_html!(A, B, C, D, E, F, G, H, I, J, K, L);
-
-#[macro_export]
-macro_rules! log {
-    ($($t:tt)*) => (web_sys::console::log_1(&format_args!($($t)*).to_string().into()))
 }
