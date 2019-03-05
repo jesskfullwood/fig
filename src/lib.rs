@@ -12,6 +12,7 @@ use html::{Attribute, Event};
 
 pub mod fetch;
 pub mod html;
+pub use url;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
@@ -24,6 +25,36 @@ pub trait Model: 'static + Debug {
 
 type Str = Cow<'static, str>;
 
+fn get_str_prop(elem: &Element, key: &str) -> JsResult<String> {
+    let key = JsValue::from_str(key);
+    js_sys::Reflect::get(elem, &key).and_then(|val| val.as_string().ok_or(val))
+}
+
+fn intercept_links<M: Model>(
+    root: Element,
+    handler: fn(url::Url) -> M::Msg,
+) -> JsResult<Listener<M>> {
+    log!("Intercepting links");
+    let cb = move |event: DomEvent| -> Cmd<M::Msg> {
+        log!("Links handler callback");
+        let target: web_sys::EventTarget = event.target().expect("Missing target");
+        let target_el: &Element = target.dyn_ref().expect("Not an Element");
+        if target_el.tag_name() == "A" {
+            let target_el: &web_sys::HtmlAnchorElement =
+                target_el.dyn_ref().expect("Not an anchor");
+            if let Ok(urlstr) = get_str_prop(target_el, "href") {
+                event.prevent_default();
+                let url = url::Url::parse(&urlstr)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))
+                    .expect("Url parse failed");
+                return Cmd::Msg(handler(url));
+            }
+        }
+        Cmd::None
+    };
+    event_handler(root, "click", cb)
+}
+
 struct App<M: Model> {
     document: Document,
     target: HtmlDivElement,
@@ -34,7 +65,7 @@ struct App<M: Model> {
 }
 
 thread_local! {
-    pub static APP: *mut () = std::ptr::null_mut();
+    static APP: *mut () = std::ptr::null_mut();
 }
 
 impl<M: Model> Drop for App<M> {
@@ -51,6 +82,11 @@ impl<M: Model + Debug> Debug for App<M> {
 
 impl<M: Model> App<M> {
     fn loop_update(&mut self, mut cmd: Cmd<M::Msg>) -> JsResult<()> {
+        if let Cmd::None = cmd {
+            // null op
+            log!("Update: nil op");
+            return Ok(());
+        }
         let mut loopct = 0;
         loop {
             loopct += 1;
@@ -109,6 +145,7 @@ pub fn run<M: Model>(
     model: M,
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
+    on_url_change: fn(url::Url) -> M::Msg,
     target: &str,
 ) -> JsResult<()> {
     console_error_panic_hook::set_once();
@@ -118,6 +155,7 @@ pub fn run<M: Model>(
         .get_element_by_id(target)
         .expect("Target element not found");
     let target: HtmlDivElement = target.dyn_into()?;
+    let downcast_cpy: Element = target.clone().dyn_into().unwrap();
     let initial = document.create_element(&Tag::Div.to_string())?;
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
@@ -151,6 +189,10 @@ pub fn run<M: Model>(
         // initial render
         app.current_vdom = app.render_dom().expect("Render failed");
     });
+
+    let link_listener = intercept_links::<M>(downcast_cpy, on_url_change)?;
+    Box::leak(Box::new(link_listener));
+
     Ok(())
 }
 
@@ -363,7 +405,7 @@ pub struct Listener<M: Model> {
 
 impl<M: Model> Drop for Listener<M> {
     fn drop(&mut self) {
-        log!("Detching listener");
+        log!("Detaching listener for {}", self.type_);
         self.element
             .remove_event_listener_with_callback(&self.type_, self.closure.as_ref().unchecked_ref())
             .expect("failed to remove");
@@ -387,7 +429,7 @@ impl<M: Model> Listener<M> {
     }
 }
 
-fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> M::Msg + 'static>(
+fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
     element: Element,
     event_name: S,
     handler: F,
@@ -395,15 +437,16 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> M::Msg + 'static>(
     let event_name = event_name.into();
     log!("New event hander closure");
     let closure = Closure::wrap(Box::new(move |event: DomEvent| {
+        log!("Hello closure");
         web_sys::console::time();
-        let cmd = Cmd::Msg(handler(event));
+        let cmd = handler(event);
         App::<M>::with(move |app| {
             app.loop_update(cmd).expect("Update error");
         });
         web_sys::console::time_end();
     }) as Box<FnMut(DomEvent)>);
     let jsfunction = closure.as_ref().unchecked_ref();
-    element.add_event_listener_with_callback(&event_name, jsfunction);
+    element.add_event_listener_with_callback(&event_name, jsfunction)?;
     Ok(Listener::new(element, event_name, closure))
 }
 
@@ -411,12 +454,12 @@ fn input_handler<M: Model>(
     element: &Element,
     handler: Rc<dyn Fn(String) -> M::Msg>,
 ) -> JsResult<Listener<M>> {
-    let key = JsValue::from_str("value");
     let inner = move |event: DomEvent| {
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
-        let val = js_sys::Reflect::get(target_el, &key).expect("Failed to get property");
-        handler(val.as_string().expect("value not a string"))
+        Cmd::Msg(handler(
+            get_str_prop(target_el, "value").expect("missing value"),
+        ))
     };
     event_handler::<M, _, _>(element.clone(), "input", inner)
 }
@@ -425,14 +468,14 @@ fn click_handler<M: Model>(
     element: &Element,
     handler: Rc<dyn Fn() -> M::Msg>,
 ) -> JsResult<Listener<M>> {
-    let inner = move |_event: DomEvent| handler();
+    let inner = move |_event: DomEvent| Cmd::Msg(handler());
     event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
 fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
     match event {
-        Event::OnClick { id, cb } => click_handler::<M>(&element, cb.clone()),
-        Event::OnInput { id, cb } => input_handler::<M>(&element, cb.clone()),
+        Event::OnClick { cb, .. } => click_handler::<M>(&element, cb.clone()),
+        Event::OnInput { cb, .. } => input_handler::<M>(&element, cb.clone()),
     }
 }
 

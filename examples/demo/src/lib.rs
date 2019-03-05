@@ -37,6 +37,15 @@ enum Route {
     Summary,
 }
 
+fn on_url_change(url: url::Url) -> Msg {
+    log!("Url change");
+    match url.path() {
+        "/" | "/items" => Msg::Route(Route::Items),
+        "/summary" => Msg::Route(Route::Summary),
+        _ => unimplemented!(),
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Msg {
     Select(String),
@@ -184,5 +193,5 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(Model::default(), update, view, "app").expect("Failed to run");
+    tree::run(Model::default(), update, view, on_url_change, "app").expect("Failed to run");
 }

@@ -14,7 +14,7 @@ serde = "1.0.89"
 wasm-bindgen-futures = "0.3.14"
 serde_json = "1.0.39"
 futures = "0.1.25"
-closures = "0.1.2"
+url = "1.7.2"
 
 [dependencies.web-sys]
 version = "0.3.14"
@@ -29,6 +29,7 @@ features = [
   'EventTarget',
   'FetchEvent',
   'Headers',
+  'HtmlAnchorElement',
   'HtmlCollection',
   'HtmlDivElement',
   'HtmlElement',
@@ -36,6 +37,7 @@ features = [
   'HtmlSelectElement',
   'HtmlTextAreaElement',
   'InputEvent',
+  'Location',
   'Node',
   'NodeList',
   'ReferrerPolicy',
