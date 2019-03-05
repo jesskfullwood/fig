@@ -131,16 +131,21 @@ fn view(model: &Model) -> Html<Model> {
         div!(
             p!(class("bluesy"), "Classy!"),
             button!(
-                on_click!(|()| Msg::ButtonClick),
+                on_click((), |()| Msg::ButtonClick),
                 format!("Clicked: {}", model.click_ct),
             ),
             select!(
-                on_input!(|(), sel| Msg::Select(sel)),
+                on_input((), |(), sel| Msg::Select(sel)),
                 option!(value("this"), "this"),
                 option!(value("that"), "that"),
                 option!(value("other"), "other"),
             ),
-            button!(on_click!(model.select.clone(), |select| Msg::FetchSelected(select.clone())), "Send request"),
+            button!(
+                on_click(model.select.clone(), |select| Msg::FetchSelected(
+                    select.clone()
+                )),
+                "Send request"
+            ),
             p!({
                 let says = if let Some(ref says) = model.server_says {
                     says
@@ -150,8 +155,8 @@ fn view(model: &Model) -> Html<Model> {
                 format!("Our server says: {}", says)
             })
         ),
-        button!(on_click!(|()| Msg::AddLi), "+ item"),
-        button!(on_click!(|()| Msg::RmLi), "- item"),
+        button!(on_click((), |()| Msg::AddLi), "+ item"),
+        button!(on_click((), |()| Msg::RmLi), "- item"),
         ul!((0..model.list_ct)
             .map(|i| li!(format!("List item {}", i)))
             .collect::<Vec<_>>()),

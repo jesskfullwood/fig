@@ -1,10 +1,8 @@
-use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashMap;
+use crate::{Html, Model, Str};
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-
-use crate::{log, Html, Listener, Model, Str};
 
 #[derive(Debug, PartialEq)]
 pub enum Attribute {
@@ -15,23 +13,70 @@ pub enum Attribute {
     Style(Style),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClosureId(u64);
+
 pub enum Event<M: Model> {
-    OnClick(Rc<dyn Fn() -> M::Msg>),
-    OnInput(Rc<dyn Fn(String) -> M::Msg>),
-    Unchanged,
+    OnClick {
+        id: ClosureId,
+        cb: Rc<Fn() -> M::Msg>,
+    },
+    OnInput {
+        id: ClosureId,
+        cb: Rc<Fn(String) -> M::Msg>,
+    },
 }
 
-thread_local! {
-    static EVENT_MAP: RefCell<HashMap<u32, Box<dyn Any>>> = RefCell::new(HashMap::new());
+impl<M: Model> Event<M> {
+    fn id(&self) -> ClosureId {
+        match self {
+            Event::OnClick { id, .. } => *id,
+            Event::OnInput { id, .. } => *id,
+        }
+    }
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Event::OnClick(ptr) => write!(f, "Event(OnClick({:p})", ptr),
-            Event::OnInput(ptr) => write!(f, "Event(OnInput({:p})", ptr),
-            Event::Unchanged => write!(f, "Event(Unchanged)"),
+            Event::OnClick { id, .. } => write!(f, "OnClickEvent({:?})", id),
+            Event::OnInput { id, .. } => write!(f, "OnInputEvent({:?})", id),
         }
+    }
+}
+
+impl<M: Model> PartialEq for Event<M> {
+    fn eq(&self, other: &Event<M>) -> bool {
+        self.id() == other.id()
+    }
+}
+
+fn hash_closure<S: Hash, F: Hash>(s: S, f: F) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    f.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub fn on_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
+    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
+    // https://github.com/rust-lang/rust/issues/46989
+    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
+    let hash = hash_closure(&s, ptr);
+    Event::OnClick {
+        id: ClosureId(hash),
+        cb: Rc::new(move || f(&s)),
+    }
+}
+
+pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
+    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
+    // https://github.com/rust-lang/rust/issues/46989
+    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
+    let hash = hash_closure(&s, ptr);
+    Event::OnInput {
+        id: ClosureId(hash),
+        cb: Rc::new(move |val| f(&s, val)),
     }
 }
 
@@ -46,61 +91,6 @@ macro_rules! attr_key_value {
 attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
-
-macro_rules! closure_handler {
-    ($func_name:ident, $macro_name:ident, $functy:ty, $closurety:ty, $event:ident) => {
-        #[doc(hidden)]
-        pub fn $func_name<M: Model, S: PartialEq + Clone + 'static>(
-            state: S,
-            f: $functy,
-            callsite_id: u32,
-        ) -> Event<M> {
-            let cl = <$closurety>::new(state, f);
-            EVENT_MAP.with(|map| {
-                let mut map = map.borrow_mut();
-                let previous: Option<&Box<Any>> = map.get(&callsite_id);
-                if let Some(prev) = previous.and_then(|any| any.downcast_ref::<Rc<$closurety>>()) {
-                    if &cl == prev.as_ref() {
-                        // Short-circuit the happy path
-                        return Event::Unchanged;
-                    }
-                };
-                log!("Closure @{} **changed**", callsite_id);
-                let cl = Rc::new(cl);
-                map.insert(callsite_id, Box::new(cl.clone()) as Box<dyn Any>);
-                Event::$event(cl)
-            })
-        }
-
-        #[macro_export]
-        macro_rules! $macro_name {
-            ($state:expr, $closure2:expr) => {
-                // XXX using line! is a total hack and will break in mysterious ways
-                // e.g. if two invocations in different files are on the same line count.
-                // How else to get unique callsite id?
-                $crate::html::$func_name($state, $closure2, line!())
-            };
-            ($closure2:expr) => {
-                $crate::html::$func_name((), $closure2, line!())
-            };
-        }
-    };
-}
-
-closure_handler!(
-    __on_click,
-    on_click,
-    fn(&S) -> M::Msg,
-    closures::Closure<_, _>,
-    OnClick
-);
-closure_handler!(
-    __on_input,
-    on_input,
-    fn(&S, String) -> M::Msg,
-    closures::Closure1<_, _, _>,
-    OnInput
-);
 
 pub fn class(c: impl Classify) -> Attribute {
     Attribute::Class(c.classify())

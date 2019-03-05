@@ -155,7 +155,7 @@ pub fn run<M: Model>(
 }
 
 /// A tree describing which nodes have changed and how
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum Diff {
     Create,
     Replace,
@@ -169,6 +169,54 @@ enum Diff {
     Unchanged,
 }
 
+impl Debug for Diff {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Diff::*;
+        let txt = match self {
+            Create => "Create",
+            Replace => "Replace",
+            Remove => "Remove",
+            Unchanged => "Unchanged",
+            Update {
+                text,
+                attrs,
+                events,
+                children,
+            } => {
+                write!(f, "Update {{ ")?;
+                if *text {
+                    write!(f, "text ")?;
+                }
+                if *attrs {
+                    write!(f, "attrs ")?;
+                }
+                if *events {
+                    write!(f, "events ")?;
+                }
+                if !children.is_empty() {
+                    write!(f, "children: [")?;
+                    for c in children {
+                        write!(f, "{:?}", c)?;
+                    }
+                    write!(f, "]")?;
+                }
+                return write!(f, "}}");
+            }
+        };
+        write!(f, "{}", txt)
+    }
+}
+
+impl Diff {
+    fn is_unchanged(&self) -> bool {
+        if let Diff::Unchanged = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
     if current.tag != next.tag {
         // assume everything can be nuked
@@ -176,33 +224,8 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
     }
 
     let text_changed = current.text != next.text;
-    let mut attrs_changed = false;
-
-    // TODO ordering may change?? Is it even possible to add new attrs?
-    for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
-        if old_attr != new_attr {
-            attrs_changed = true
-        }
-    }
-
-    for (old_attr, new_attr) in current.attrs.iter().zip(next.attrs.iter()) {
-        if old_attr != new_attr {
-            attrs_changed = true
-        }
-    }
-
-    let events_changed = next
-        .events
-        .iter()
-        .filter(|ev| {
-            if let Event::Unchanged = ev {
-                false
-            } else {
-                true
-            }
-        })
-        .count()
-        > 0;
+    let attrs_changed = current.attrs != next.attrs;
+    let events_changed = current.events != next.events;
 
     let mut child_diffs = Vec::new();
 
@@ -226,7 +249,10 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
         .zip(next.children.iter())
         .enumerate()
     {
-        child_diffs.push((ix as u32, diff_vdom(old, new)))
+        let diff = diff_vdom(old, new);
+        if !diff.is_unchanged() {
+            child_diffs.push((ix as u32, diff_vdom(old, new)))
+        }
     }
 
     if !text_changed && !attrs_changed && !events_changed && child_diffs.is_empty() {
@@ -403,9 +429,8 @@ fn click_handler<M: Model>(
 
 fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
     match event {
-        Event::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
-        Event::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
-        Event::Unchanged => unreachable!("Unchanged event shall not be attached to DOM"),
+        Event::OnClick { id, cb } => click_handler::<M>(&element, cb.clone()),
+        Event::OnInput { id, cb } => input_handler::<M>(&element, cb.clone()),
     }
 }
 
