@@ -7,6 +7,7 @@ use std::rc::Rc;
 #[derive(Debug, PartialEq)]
 pub enum Attribute {
     Value(Str),
+    Href(Str),
     Placeholder(Str),
     Class(Vec<Str>),
     Id(Str),
@@ -91,6 +92,7 @@ macro_rules! attr_key_value {
 attr_key_value!(id, Id);
 attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
+attr_key_value!(href, Href);
 
 pub fn class(c: impl Classify) -> Attribute {
     Attribute::Class(c.classify())

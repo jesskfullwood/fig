@@ -14,6 +14,7 @@ struct Model {
     click_ct: u32,
     list_ct: u32,
     server_says: Option<String>,
+    route: Route,
 }
 
 impl Default for Model {
@@ -25,8 +26,15 @@ impl Default for Model {
             click_ct: 0,
             list_ct: 5,
             server_says: None,
+            route: Route::Summary,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    Items,
+    Summary,
 }
 
 #[derive(Clone, Debug)]
@@ -39,6 +47,7 @@ enum Msg {
     RmLi,
     FetchSelected(String),
     FetchedSelected(String),
+    Route(Route),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -101,6 +110,7 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             },
             Cmd::None,
         ),
+        Msg::Route(route) => (Model { route, ..model }, Cmd::None),
     }
 }
 
@@ -155,11 +165,20 @@ fn view(model: &Model) -> Html<Model> {
                 format!("Our server says: {}", says)
             })
         ),
-        button!(on_click((), |()| Msg::AddLi), "+ item"),
-        button!(on_click((), |()| Msg::RmLi), "- item"),
-        ul!((0..model.list_ct)
-            .map(|i| li!(format!("List item {}", i)))
-            .collect::<Vec<_>>()),
+        div!(if Route::Items == model.route {
+            div!(
+                button!(on_click((), |()| Msg::AddLi), "+ item"),
+                button!(on_click((), |()| Msg::RmLi), "- item"),
+                ul!((0..model.list_ct)
+                    .map(|i| li!(format!("List item {}", i)))
+                    .collect::<Vec<_>>()),
+            )
+        } else {
+            div!(
+                p!(format!("You have created {} items", model.list_ct)),
+                p!(a!(href("/items"), "Click to view"))
+            )
+        })
     )
 }
 

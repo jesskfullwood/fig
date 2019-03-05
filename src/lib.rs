@@ -439,11 +439,12 @@ fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsRes
 fn apply_attr_to_elem(attr: &Attribute, element: &Element) -> JsResult<()> {
     use Attribute::*;
     match attr {
-        Value(val) => element.set_attribute("value", val)?,
-        Placeholder(val) => element.set_attribute("placeholder", val)?,
-        Id(val) => element.set_attribute("id", val)?,
         Class(classes) => element.set_attribute("class", &classes.join(" "))?,
+        Href(val) => element.set_attribute("href", val)?,
+        Id(val) => element.set_attribute("id", val)?,
+        Placeholder(val) => element.set_attribute("placeholder", val)?,
         Style(style) => (),
+        Value(val) => element.set_attribute("value", val)?,
     };
     Ok(())
 }
@@ -538,6 +539,7 @@ macro_rules! make_tags {
 // https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
 make_tags! {
     $,
+    A => a,
     B => b,
     Button => button,
     Div => div,
