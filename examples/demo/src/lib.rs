@@ -20,28 +20,38 @@ struct Model {
 impl Default for Model {
     fn default() -> Model {
         Model {
-            select: String::new(),
+            select: "this".into(),
             check: false,
             input: "Initial".into(),
             click_ct: 0,
             list_ct: 5,
             server_says: None,
-            route: Route::Summary,
+            route: Route::Home,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
+    Home,
     Items,
     Summary,
 }
 
-fn on_url_change(url: url::Url) -> Msg {
+fn on_url_request(req: tree::UrlRequest) -> Cmd<Msg> {
+    use tree::UrlRequest::*;
+    match req {
+        Internal(url) => Cmd::PushUrl(url),
+        External(urlstr) => Cmd::NavigateAway(urlstr),
+    }
+}
+
+fn on_url_change(url: url::Url) -> Cmd<Msg> {
     log!("Url change");
     match url.path() {
-        "/" | "/items" => Msg::Route(Route::Items),
-        "/summary" => Msg::Route(Route::Summary),
+        "/" => Cmd::Msg(Msg::Route(Route::Home)),
+        "/items" => Cmd::Msg(Msg::Route(Route::Items)),
+        "/summary" => Cmd::Msg(Msg::Route(Route::Summary)),
         _ => unimplemented!(),
     }
 }
@@ -174,24 +184,35 @@ fn view(model: &Model) -> Html<Model> {
                 format!("Our server says: {}", says)
             })
         ),
-        div!(if Route::Items == model.route {
-            div!(
-                button!(on_click((), |()| Msg::AddLi), "+ item"),
-                button!(on_click((), |()| Msg::RmLi), "- item"),
-                ul!((0..model.list_ct)
-                    .map(|i| li!(format!("List item {}", i)))
-                    .collect::<Vec<_>>()),
-            )
-        } else {
-            div!(
-                p!(format!("You have created {} items", model.list_ct)),
-                p!(a!(href("/items"), "Click to view"))
-            )
-        })
+        div!(
+            p!(a!(href("/"), "Home")),
+            match model.route {
+                Route::Home => div!(
+                    p!(a!(href("/items"), "View items")),
+                    p!(a!(href("/summary"), "View summary"))
+                ),
+                Route::Items => div!(
+                    button!(on_click((), |()| Msg::AddLi), "+ item"),
+                    button!(on_click((), |()| Msg::RmLi), "- item"),
+                    ul!((0..model.list_ct)
+                        .map(|i| li!(format!("List item {}", i)))
+                        .collect::<Vec<_>>()),
+                ),
+                Route::Summary => div!(p!(format!("You have created {} items", model.list_ct)),),
+            }
+        )
     )
 }
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(Model::default(), update, view, on_url_change, "app").expect("Failed to run");
+    tree::run(
+        Model::default(),
+        update,
+        view,
+        on_url_request,
+        on_url_change,
+        "app",
+    )
+    .expect("Failed to run");
 }

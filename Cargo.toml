@@ -29,6 +29,7 @@ features = [
   'EventTarget',
   'FetchEvent',
   'Headers',
+  'History',
   'HtmlAnchorElement',
   'HtmlCollection',
   'HtmlDivElement',

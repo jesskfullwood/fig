@@ -1,7 +1,9 @@
 use derive_more::Constructor;
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use web_sys::{Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement};
+use web_sys::{
+    Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement, Location, Window,
+};
 
 use std::borrow::Cow;
 use std::borrow::{Borrow, BorrowMut};
@@ -16,6 +18,8 @@ pub use url;
 
 type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
 type ViewFn<Model> = fn(&Model) -> Html<Model>;
+type OnUrlRequestFn<Msg> = fn(UrlRequest) -> Cmd<Msg>;
+type OnUrlChangeFn<Msg> = fn(url::Url) -> Cmd<Msg>;
 
 type JsResult<T> = Result<T, JsValue>;
 
@@ -31,36 +35,44 @@ fn get_str_prop(elem: &Element, key: &str) -> JsResult<String> {
 }
 
 fn intercept_links<M: Model>(
+    location: Location,
     root: Element,
-    handler: fn(url::Url) -> M::Msg,
+    handler: fn(UrlRequest) -> Cmd<M::Msg>,
 ) -> JsResult<Listener<M>> {
     log!("Intercepting links");
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
         log!("Links handler callback");
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &Element = target.dyn_ref().expect("Not an Element");
-        if target_el.tag_name() == "A" {
-            let target_el: &web_sys::HtmlAnchorElement =
-                target_el.dyn_ref().expect("Not an anchor");
-            if let Ok(urlstr) = get_str_prop(target_el, "href") {
-                event.prevent_default();
-                let url = url::Url::parse(&urlstr)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))
-                    .expect("Url parse failed");
-                return Cmd::Msg(handler(url));
-            }
+        if target_el.tag_name() != "A" {
+            // short circuit
+            return Cmd::None;
         }
-        Cmd::None
+        event.prevent_default();
+        let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
+        let urlstr = get_str_prop(target_el, "href").expect("No href");
+        let ahost = get_str_prop(target_el, "host").expect("No anchor host");
+        let req = if ahost == location.host().expect("No location host") {
+            let url = url::Url::parse(&urlstr)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+                .expect("Url parse failed");
+            UrlRequest::Internal(url)
+        } else {
+            UrlRequest::External(urlstr)
+        };
+        handler(req)
     };
     event_handler(root, "click", cb)
 }
 
 struct App<M: Model> {
-    document: Document,
+    window: Window,
     target: HtmlDivElement,
     model: Option<M>,
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
+    on_url_request: OnUrlRequestFn<M::Msg>,
+    on_url_change: OnUrlChangeFn<M::Msg>,
     current_vdom: Html<M>,
 }
 
@@ -106,6 +118,15 @@ impl<M: Model> App<M> {
                     fetch::spawn_local(fut);
                     break;
                 }
+                Cmd::NavigateAway(urlstr) => {
+                    let loc = self.window.location();
+                    loc.set_href(&urlstr).expect("Failed to set location");
+                    cmd = Cmd::None;
+                }
+                Cmd::PushUrl(url) => {
+                    self.push_state(&url).expect("Failed to push state");
+                    cmd = (self.on_url_change)(url);
+                }
             }
             if loopct > 100 {
                 panic!("Infinite loop!")
@@ -126,7 +147,8 @@ impl<M: Model> App<M> {
         } else {
             log!("vdom diff: {:?}", diff);
             let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), Vec::new(), vec![new_vdom]);
-            render_diff(&tmp_div, &[(0, diff)], &self.target, &self.document)?;
+            let document = self.window.document().expect("No document");
+            render_diff(&tmp_div, &[(0, diff)], &self.target, &document)?;
             new_vdom = tmp_div.children.remove(0);
         }
         Ok(new_vdom)
@@ -139,18 +161,31 @@ impl<M: Model> App<M> {
             unsafe { f(&mut *ptr) }
         })
     }
+
+    fn push_state(&self, url: &url::Url) -> JsResult<()> {
+        let history = self.window.history().expect("No history");
+        history.push_state_with_url(&JsValue::NULL, "", Some(&url.to_string()))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum UrlRequest {
+    Internal(url::Url),
+    External(String),
 }
 
 pub fn run<M: Model>(
     model: M,
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
-    on_url_change: fn(url::Url) -> M::Msg,
+    on_url_request: OnUrlRequestFn<M::Msg>,
+    on_url_change: OnUrlChangeFn<M::Msg>,
     target: &str,
 ) -> JsResult<()> {
     console_error_panic_hook::set_once();
-    let window = web_sys::window().expect("no global `window` exists");
-    let document = window.document().expect("should have a document on window");
+    let window = web_sys::window().expect("No global `window` exists");
+    let document = window.document().expect("No document");
+    let location = document.location().expect("No location");
     let target = document
         .get_element_by_id(target)
         .expect("Target element not found");
@@ -160,11 +195,13 @@ pub fn run<M: Model>(
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
     let app = App {
-        document,
+        window,
         target,
         model: Some(model),
         update,
         view,
+        on_url_request,
+        on_url_change,
         current_vdom: Html::tag(Tag::Div), // now the dom and vdom are in sync
     };
 
@@ -190,7 +227,7 @@ pub fn run<M: Model>(
         app.current_vdom = app.render_dom().expect("Render failed");
     });
 
-    let link_listener = intercept_links::<M>(downcast_cpy, on_url_change)?;
+    let link_listener = intercept_links::<M>(location, downcast_cpy, on_url_request)?;
     Box::leak(Box::new(link_listener));
 
     Ok(())
@@ -363,6 +400,8 @@ pub enum Cmd<Msg> {
     None,
     Msg(Msg),
     Fetch(Box<Future<Item = Msg, Error = JsValue>>),
+    NavigateAway(String),
+    PushUrl(url::Url),
 }
 
 #[derive(Debug, Constructor)]
