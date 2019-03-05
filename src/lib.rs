@@ -270,7 +270,7 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
 fn render_diff<M: Model>(
     this_vnode: &Html<M>,
     child_diffs: &[(u32, Diff)],
-    this_el: &HtmlElement,
+    this_el: &Element,
     doc: &Document,
 ) -> JsResult<()> {
     // This might seem slightly odd. Why are we applying changes to the children
@@ -300,15 +300,17 @@ fn render_diff<M: Model>(
                 children,
             } => {
                 let child_vnode = &this_vnode.children[ix as usize];
-                let child_el: Element = child_els.get_with_index(ix).expect("bad node index");
-                let child_el: &HtmlElement = child_el.dyn_ref().expect("bad element cast");
+                let mut child_el: Element = child_els.get_with_index(ix).expect("bad node index");
+                if *events {
+                    child_el = child_vnode.replace_events(&child_el)?;
+                }
                 if *text {
                     child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()));
                 }
                 if *attrs {
-                    child_vnode.reapply_attrs(child_el)?;
+                    child_vnode.reapply_attrs(&child_el)?;
                 }
-                render_diff(&child_vnode, &*children, child_el, doc)?;
+                render_diff(&child_vnode, &*children, &child_el, doc)?;
             }
         }
     }
@@ -459,6 +461,26 @@ impl<M: Model> Html<M> {
             apply_attr_to_elem(attr, element)?
         }
         Ok(())
+    }
+
+    fn replace_events(&self, element: &Element) -> JsResult<Element> {
+        log!("Replacing listeners");
+
+        // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
+        // Stupid hack IMO
+        let new_element = element.clone_node_with_deep(true)?;
+        let new_element: Element = new_element.dyn_into()?;
+
+        element
+            .parent_node()
+            .unwrap()
+            .replace_child(&new_element, &element)?;
+        for event in &self.events {
+            let listener = attach_event_listener(event, &new_element)?;
+            // TODO stop leaking the listener!
+            Box::leak(Box::new(listener));
+        }
+        Ok(new_element)
     }
 
     fn render_to_dom(&self, document: &Document) -> JsResult<Element> {

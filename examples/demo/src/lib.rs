@@ -123,7 +123,7 @@ fn view(model: &Model) -> Html<Model> {
         div!(
             input!(
                 value(model.input.clone()),
-                // on_input(Msg::Input),
+                on_input((), |(), input| Msg::Input(input)),
                 placeholder("placeholder")
             ),
             p!(i!("Boldly repeat: "), b!(model.input.clone()))
