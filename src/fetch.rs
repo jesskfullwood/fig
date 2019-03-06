@@ -1,9 +1,4 @@
 //! High-level interface for web_sys HTTP requests.
-//! https://rustwasm.github.io/wasm-bindgen/examples/fetch.html
-//! See https://rustwasm.github.io/wasm-bindgen/reference/js-promises-and-rust-futures.html
-//! https://rustwasm.github.io/wasm-bindgen/api/web_sys/struct.Request.html
-//! https://rustwasm.github.io/wasm-bindgen/api/wasm_bindgen_futures/
-//! https://rustwasm.github.io/wasm-bindgen/api/web_sys/struct.Response.html
 
 // Taken from https://github.com/David-OConnor/seed/blob/6ec65388e14dfe4c9a9785518348af90575809e6/src/fetch.rs
 

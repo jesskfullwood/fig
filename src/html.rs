@@ -1,4 +1,5 @@
 use crate::{Element, Html, Model, Str};
+use derive_more::Display;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -58,28 +59,6 @@ make_html_tags! {
     Select => select,
     Span => span,
     Ul => ul
-}
-
-pub trait Stringify {
-    fn stringify(self) -> Option<Str>;
-}
-
-impl Stringify for () {
-    fn stringify(self) -> Option<Str> {
-        None
-    }
-}
-
-impl Stringify for &'static str {
-    fn stringify(self) -> Option<Str> {
-        Some(self.into())
-    }
-}
-
-impl Stringify for String {
-    fn stringify(self) -> Option<Str> {
-        Some(self.into())
-    }
 }
 
 pub trait ToAttr: Sized {
@@ -151,7 +130,12 @@ macro_rules! log {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Attribute {
+/// Represents an Element attribute.
+// TODO move constructor funcs to own module
+pub struct Attribute(pub(crate) AttributeInner);
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum AttributeInner {
     Value(Str),
     Href(Str),
     Placeholder(Str),
@@ -160,41 +144,31 @@ pub enum Attribute {
     Style(Style),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ClosureId(u64);
+#[derive(Clone, Copy, Debug, PartialEq, Display)]
+struct ClosureId(u64);
 
-pub enum Event<M: Model> {
-    OnClick {
-        id: ClosureId,
-        cb: Rc<Fn() -> M::Msg>,
-    },
-    OnInput {
-        id: ClosureId,
-        cb: Rc<Fn(String) -> M::Msg>,
-    },
+pub struct Event<M: Model> {
+    id: ClosureId,
+    pub(crate) inner: EventInner<M>,
 }
 
-impl<M: Model> Event<M> {
-    fn id(&self) -> ClosureId {
-        match self {
-            Event::OnClick { id, .. } => *id,
-            Event::OnInput { id, .. } => *id,
-        }
-    }
+pub(crate) enum EventInner<M: Model> {
+    OnClick(Rc<Fn() -> M::Msg>),
+    OnInput(Rc<Fn(String) -> M::Msg>),
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Event::OnClick { id, .. } => write!(f, "OnClickEvent({:?})", id),
-            Event::OnInput { id, .. } => write!(f, "OnInputEvent({:?})", id),
+        match self.inner {
+            EventInner::OnClick(_) => write!(f, "OnClickEvent({})", self.id),
+            EventInner::OnInput(_) => write!(f, "OnInputEvent({})", self.id),
         }
     }
 }
 
 impl<M: Model> PartialEq for Event<M> {
     fn eq(&self, other: &Event<M>) -> bool {
-        self.id() == other.id()
+        self.id == other.id
     }
 }
 
@@ -210,9 +184,9 @@ pub fn on_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Ev
     // https://github.com/rust-lang/rust/issues/46989
     let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
     let hash = hash_closure(&s, ptr);
-    Event::OnClick {
+    Event {
         id: ClosureId(hash),
-        cb: Rc::new(move || f(&s)),
+        inner: EventInner::OnClick(Rc::new(move || f(&s))),
     }
 }
 
@@ -221,16 +195,16 @@ pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) 
     // https://github.com/rust-lang/rust/issues/46989
     let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
     let hash = hash_closure(&s, ptr);
-    Event::OnInput {
+    Event {
         id: ClosureId(hash),
-        cb: Rc::new(move |val| f(&s, val)),
+        inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
     }
 }
 
 macro_rules! attr_key_value {
     ($func_name: ident, $tag: ident) => {
         pub fn $func_name(val: impl Into<Str>) -> Attribute {
-            Attribute::$tag(val.into())
+            Attribute(AttributeInner::$tag(val.into()))
         }
     };
 }
@@ -240,22 +214,19 @@ attr_key_value!(value, Value);
 attr_key_value!(placeholder, Placeholder);
 attr_key_value!(href, Href);
 
-pub fn class(c: impl Classify) -> Attribute {
-    Attribute::Class(c.classify())
+#[macro_export]
+macro_rules! class {
+    ($($item:expr),* $(,)?) => {
+        $crate::html::class(vec![$(<::std::borrow::Cow<'static, str>>::from($item),)*])
+    }
+}
+
+pub fn class(classes: Vec<Str>) -> Attribute {
+    Attribute(AttributeInner::Class(classes))
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Style;
-
-pub trait Classify {
-    fn classify(self) -> Vec<Str>;
-}
-
-impl<S: Into<Str>> Classify for S {
-    fn classify(self) -> Vec<Str> {
-        vec![self.into()]
-    }
-}
 
 pub trait ElemMod<M: Model> {
     fn modify_element(self, elem: &mut Element<M>);

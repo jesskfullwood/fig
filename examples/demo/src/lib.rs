@@ -159,7 +159,7 @@ fn view(model: &Model) -> Html<Model> {
             p!(i!("Boldly repeat: "), b!(model.input.clone()))
         ),
         div!(
-            p!(class("bluesy"), "Classy!"),
+            p!(class!("bluesy"), "Classy!"),
             button!(
                 on_click((), |()| Msg::ButtonClick),
                 format!("Clicked: {}", model.click_ct),

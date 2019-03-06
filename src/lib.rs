@@ -1,3 +1,8 @@
+//! A web-framework which prioritizes correctness and type-safety.
+//!
+//! Based closely upon The [Elm](https://elm-lang.org/) Architecture.
+//!
+
 use derive_more::{Constructor, From};
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
@@ -11,7 +16,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use html::{Attribute, Event, Tag};
+use html::{Attribute, Event, EventInner, Tag};
 
 pub mod fetch;
 pub mod html;
@@ -24,6 +29,7 @@ type OnUrlChangeFn<Msg> = fn(url::Url) -> Cmd<Msg>;
 
 type JsResult<T> = Result<T, JsValue>;
 
+/// A trait to link togather a Model type and a Msg type.
 pub trait Model: 'static + Debug {
     type Msg;
 }
@@ -183,6 +189,7 @@ pub enum UrlRequest {
     External(String),
 }
 
+/// Run the framework
 pub fn run<M: Model>(
     init: impl FnOnce(url::Url) -> (M, Cmd<M::Msg>),
     update: UpdateFn<M, M::Msg>,
@@ -458,7 +465,7 @@ impl<Msg> Cmd<Msg> {
 }
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
-/// A DOM Node
+/// Represents a DOM Node
 #[derive(Debug, From)]
 pub enum Html<M: Model> {
     Text(Str),
@@ -484,7 +491,7 @@ impl<M: Model> Html<M> {
 }
 
 #[derive(Debug, Constructor)]
-/// Represents an HTML node
+/// Represents an HTML Element
 pub struct Element<M: Model> {
     tag: Tag,
     attrs: Vec<Attribute>,
@@ -511,7 +518,7 @@ impl<M: Model> std::fmt::Display for Element<M> {
 
 /// Represents a listener attached to the DOM.
 /// When it is dropped it will detach the corresponding listener.
-pub struct Listener<M: Model> {
+struct Listener<M: Model> {
     element: DomElement,
     type_: Str,
     closure: Closure<FnMut(DomEvent)>,
@@ -590,15 +597,15 @@ fn attach_event_listener<M: Model>(
     event: &Event<M>,
     element: &DomElement,
 ) -> JsResult<Listener<M>> {
-    match event {
-        Event::OnClick { cb, .. } => click_handler::<M>(&element, cb.clone()),
-        Event::OnInput { cb, .. } => input_handler::<M>(&element, cb.clone()),
+    match &event.inner {
+        EventInner::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
+        EventInner::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
     }
 }
 
 fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
-    use Attribute::*;
-    match attr {
+    use html::AttributeInner::*;
+    match &attr.0 {
         Class(classes) => element.set_attribute("class", &classes.join(" "))?,
         Href(val) => element.set_attribute("href", val)?,
         Id(val) => element.set_attribute("id", val)?,
