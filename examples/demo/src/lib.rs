@@ -41,19 +41,20 @@ enum Route {
 fn on_url_request(req: tree::UrlRequest) -> Cmd<Msg> {
     use tree::UrlRequest::*;
     match req {
-        Internal(url) => Cmd::PushUrl(url),
-        External(urlstr) => Cmd::NavigateAway(urlstr),
+        Internal(url) => Cmd::push_url(url.to_string()),
+        External(urlstr) => Cmd::load_url(urlstr),
     }
 }
 
 fn on_url_change(url: url::Url) -> Cmd<Msg> {
     log!("Url change");
-    match url.path() {
-        "/" => Cmd::Msg(Msg::Route(Route::Home)),
-        "/items" => Cmd::Msg(Msg::Route(Route::Items)),
-        "/summary" => Cmd::Msg(Msg::Route(Route::Summary)),
-        _ => unimplemented!(),
-    }
+    let route = match url.path() {
+        "/" => Route::Home,
+        "/items" => Route::Items,
+        "/summary" => Route::Summary,
+        _other => return Cmd::load_url("/"),
+    };
+    Cmd::msg(Msg::Route(route))
 }
 
 #[derive(Clone, Debug)]
@@ -81,42 +82,42 @@ impl tree::Model for Model {
 fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     log!("update model with message: {:?}", msg);
     match msg {
-        Msg::Select(select) => (Model { select, ..model }, Cmd::None),
-        Msg::FetchSelected(val) => (model, Cmd::Fetch(Box::new(fetch_selected(val)))),
+        Msg::Select(select) => (Model { select, ..model }, Cmd::none()),
+        Msg::FetchSelected(val) => (model, Cmd::fetch(fetch_selected(val))),
         Msg::FetchedSelected(val) => (
             Model {
                 server_says: Some(val),
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
         Msg::ToggleCheck => (
             Model {
                 check: !model.check,
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
         Msg::Input(input) => (
             Model {
                 input: input.to_ascii_lowercase(),
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
         Msg::ButtonClick => (
             Model {
                 click_ct: model.click_ct + 1,
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
         Msg::AddLi => (
             Model {
                 list_ct: model.list_ct + 1,
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
         Msg::RmLi => (
             Model {
@@ -127,9 +128,9 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
                 },
                 ..model
             },
-            Cmd::None,
+            Cmd::none(),
         ),
-        Msg::Route(route) => (Model { route, ..model }, Cmd::None),
+        Msg::Route(route) => (Model { route, ..model }, Cmd::none()),
     }
 }
 
@@ -175,13 +176,13 @@ fn view(model: &Model) -> Html<Model> {
                 )),
                 "Send request"
             ),
-            p!({
+            p!("Our server says:", {
                 let says = if let Some(ref says) = model.server_says {
                     says
                 } else {
                     "Nothing!"
                 };
-                format!("Our server says: {}", says)
+                b!(says.to_string())
             })
         ),
         div!(
@@ -208,7 +209,7 @@ fn view(model: &Model) -> Html<Model> {
 #[wasm_bindgen]
 pub fn render() {
     tree::run(
-        Model::default(),
+        |url| (Model::default(), on_url_change(url)),
         update,
         view,
         on_url_request,

@@ -6,8 +6,8 @@ use web_sys::{
     Node, Text, Window,
 };
 
+use std::borrow::BorrowMut;
 use std::borrow::Cow;
-use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
@@ -46,7 +46,7 @@ fn intercept_links<M: Model>(
         let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
         if target_el.tag_name() != "A" {
             // short circuit
-            return Cmd::None;
+            return Cmd::none();
         }
         event.prevent_default();
         let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
@@ -93,39 +93,44 @@ impl<M: Model + Debug> Debug for App<M> {
 }
 
 impl<M: Model> App<M> {
-    fn loop_update(&mut self, mut cmd: Cmd<M::Msg>) -> JsResult<()> {
-        if let Cmd::None = cmd {
+    fn loop_update(&mut self, Cmd(mut cmd): Cmd<M::Msg>) -> JsResult<bool> {
+        if let CmdInner::None = cmd {
             // null op
             log!("Update: nil op");
-            return Ok(());
+            // returns that it did not rerender
+            return Ok(false);
         }
         let mut loopct = 0;
         loop {
             loopct += 1;
             log!("Loop update (ct: {})", loopct);
             match cmd {
-                Cmd::None => break,
-                Cmd::Msg(msg) => {
+                CmdInner::None => break,
+                CmdInner::Msg(msg) => {
                     let model = self.model.take().unwrap();
-                    let (new_model, new_cmd) = (self.update)(msg, model);
+                    let (new_model, Cmd(new_cmd)) = (self.update)(msg, model);
                     self.model.replace(new_model);
                     cmd = new_cmd; // we go again
                 }
-                Cmd::Fetch(request) => {
+                CmdInner::Fetch(request) => {
                     let fut = request.map(|msg: M::Msg| {
-                        App::<M>::with(|app| app.loop_update(Cmd::Msg(msg)).expect("update failed"))
+                        App::<M>::with(|app| app.loop_update(Cmd::msg(msg)).expect("update failed"))
                     });
                     fetch::spawn_local(fut);
                     break;
                 }
-                Cmd::NavigateAway(urlstr) => {
+                CmdInner::LoadUrl(urlstr) => {
                     let loc = self.window.location();
                     loc.set_href(&urlstr).expect("Failed to set location");
-                    cmd = Cmd::None;
+                    // This should ALWAYS force a reload
+                    return Ok(false);
                 }
-                Cmd::PushUrl(url) => {
-                    self.push_state(&url).expect("Failed to push state");
-                    cmd = (self.on_url_change)(url);
+                CmdInner::PushUrl(urlstr) => {
+                    // push the state...
+                    self.push_state(&urlstr).expect("Failed to push state");
+                    // Then grab the new href from Location
+                    let url = self.location().expect("No location");
+                    cmd = ((self.on_url_change)(url)).0;
                 }
             }
             if loopct > 100 {
@@ -135,12 +140,13 @@ impl<M: Model> App<M> {
         // Don't render the new dom until we finish looping
         log!("update vdom");
         self.current_vdom = self.render_dom()?;
-        Ok(())
+        // returns that it did rerender
+        Ok(true)
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
         log!("render dom");
-        let mut new_vdom = (self.view)(self.model.as_ref().unwrap());
+        let new_vdom = (self.view)(self.model.as_ref().unwrap());
         let diff = diff_vdom(&self.current_vdom, &new_vdom);
         if let Diff::Unchanged = diff {
             log!("No change");
@@ -152,7 +158,7 @@ impl<M: Model> App<M> {
         Ok(new_vdom)
     }
 
-    fn with(f: impl FnOnce(&mut Self)) {
+    fn with<R>(f: impl FnOnce(&mut Self) -> R) -> R {
         APP.with(|mut ptr| {
             let ptr: *mut () = **ptr.borrow_mut();
             let ptr: *mut App<M> = ptr as *mut App<M>;
@@ -160,9 +166,14 @@ impl<M: Model> App<M> {
         })
     }
 
-    fn push_state(&self, url: &url::Url) -> JsResult<()> {
+    fn push_state(&self, url: &str) -> JsResult<()> {
         let history = self.window.history().expect("No history");
-        history.push_state_with_url(&JsValue::NULL, "", Some(&url.to_string()))
+        history.push_state_with_url(&JsValue::NULL, "", Some(&url))
+    }
+
+    fn location(&self) -> JsResult<url::Url> {
+        let urlstr = self.window.location().href()?;
+        url::Url::parse(&urlstr).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 
@@ -173,7 +184,7 @@ pub enum UrlRequest {
 }
 
 pub fn run<M: Model>(
-    model: M,
+    init: impl FnOnce(url::Url) -> (M, Cmd<M::Msg>),
     update: UpdateFn<M, M::Msg>,
     view: ViewFn<M>,
     on_url_request: OnUrlRequestFn<M::Msg>,
@@ -184,6 +195,7 @@ pub fn run<M: Model>(
     let window = web_sys::window().expect("No global `window` exists");
     let document = window.document().expect("No document");
     let location = document.location().expect("No location");
+    let url = url::Url::parse(&location.href()?).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let target = document
         .get_element_by_id(target)
         .expect("Target element not found");
@@ -192,6 +204,9 @@ pub fn run<M: Model>(
     let initial = document.create_element(&Tag::Div.to_string())?;
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
+
+    let (model, initcmd) = init(url);
+
     let app = App {
         window,
         target,
@@ -221,9 +236,12 @@ pub fn run<M: Model>(
     // From this point on we only interact with App through App::with.
     // Then it's safe, hopefully.
     App::<M>::with(|app| {
-        // initial render
-        app.current_vdom = app.render_dom().expect("Render failed");
-    });
+        // Run initial command, then rerender just to be sure
+        if app.loop_update(initcmd)? {
+            app.render_dom()?;
+        }
+        Result::<(), JsValue>::Ok(())
+    })?;
 
     let link_listener = intercept_links::<M>(location, downcast_cpy, on_url_request)?;
     Box::leak(Box::new(link_listener));
@@ -407,12 +425,36 @@ fn render_diff<'a, M: Model>(
     Ok(())
 }
 
-pub enum Cmd<Msg> {
+pub struct Cmd<Msg>(CmdInner<Msg>);
+
+enum CmdInner<Msg> {
     None,
     Msg(Msg),
     Fetch(Box<Future<Item = Msg, Error = JsValue>>),
-    NavigateAway(String),
-    PushUrl(url::Url),
+    LoadUrl(Str),
+    PushUrl(Str),
+}
+
+impl<Msg> Cmd<Msg> {
+    pub fn none() -> Self {
+        Cmd(CmdInner::None)
+    }
+
+    pub fn msg(msg: Msg) -> Self {
+        Cmd(CmdInner::Msg(msg))
+    }
+
+    pub fn fetch(fut: impl Future<Item = Msg, Error = JsValue> + 'static) -> Self {
+        Cmd(CmdInner::Fetch(Box::new(fut)))
+    }
+
+    pub fn push_url(s: impl Into<Str>) -> Self {
+        Cmd(CmdInner::PushUrl(s.into()))
+    }
+
+    pub fn load_url(s: impl Into<Str>) -> Self {
+        Cmd(CmdInner::LoadUrl(s.into()))
+    }
 }
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
@@ -529,7 +571,7 @@ fn input_handler<M: Model>(
     let inner = move |event: DomEvent| {
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
-        Cmd::Msg(handler(
+        Cmd::msg(handler(
             get_str_prop(target_el, "value").expect("missing value"),
         ))
     };
@@ -540,7 +582,7 @@ fn click_handler<M: Model>(
     element: &DomElement,
     handler: Rc<dyn Fn() -> M::Msg>,
 ) -> JsResult<Listener<M>> {
-    let inner = move |_event: DomEvent| Cmd::Msg(handler());
+    let inner = move |_event: DomEvent| Cmd::msg(handler());
     event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
