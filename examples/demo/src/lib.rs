@@ -148,7 +148,7 @@ fn view(model: &Model) -> Html<Model> {
     div!(
         id("my-app"),
         h1!("Tree demo"),
-        p!("Enter some text!"),
+        p!("Enter some ", b!("text"), " if you please!"),
         div!(
             input!(
                 value(model.input.clone()),
@@ -185,6 +185,7 @@ fn view(model: &Model) -> Html<Model> {
             })
         ),
         div!(
+            id("links"),
             p!(a!(href("/"), "Home")),
             match model.route {
                 Route::Home => div!(

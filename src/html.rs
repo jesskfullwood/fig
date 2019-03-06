@@ -29,7 +29,7 @@ macro_rules! make_html_tags {
                         use $crate::{Element, html::{Tag, ElemMod}};
                         let mut element = Element::tag(Tag::$typ);
                         $d($modifier.modify_element(&mut element);)*;
-                        html
+                        Html::from(element)
                     }
                 }
             }
@@ -263,13 +263,13 @@ pub trait ElemMod<M: Model> {
 
 impl<M: Model> ElemMod<M> for &'static str {
     fn modify_element(self, elem: &mut Element<M>) {
-        elem.children.push(Html::from(self.into()))
+        elem.children.push(Html::from(Str::from(self)))
     }
 }
 
 impl<M: Model> ElemMod<M> for String {
     fn modify_element(self, elem: &mut Element<M>) {
-        elem.children.push(Html::from(self.into()))
+        elem.children.push(Html::from(Str::from(self)))
     }
 }
 

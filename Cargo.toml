@@ -49,5 +49,6 @@ features = [
   'RequestMode',
   'RequestRedirect',
   'Response',
+  'Text',
   'Window',
 ]

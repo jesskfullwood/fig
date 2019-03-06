@@ -3,7 +3,7 @@ use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{
     Document, Element as DomElement, Event as DomEvent, HtmlDivElement, HtmlElement, Location,
-    Window,
+    Node, Text, Window,
 };
 
 use std::borrow::Cow;
@@ -146,15 +146,8 @@ impl<M: Model> App<M> {
             log!("No change");
         } else {
             log!("vdom diff: {:?}", diff);
-            let mut tmp_div = Html::from(Element::new(
-                Tag::Div,
-                Vec::new(),
-                Vec::new(),
-                vec![new_vdom],
-            ));
             let document = self.window.document().expect("No document");
-            render_diff(&tmp_div, &[(0, diff)], &self.target, &document)?;
-            new_vdom = tmp_div.children.remove(0);
+            render_diff(&self.target, &[(0, diff)], &document)?;
         }
         Ok(new_vdom)
     }
@@ -240,40 +233,36 @@ pub fn run<M: Model>(
 
 /// A tree describing which nodes have changed and how
 #[derive(Clone)]
-enum Diff {
-    Create,
-    Replace,
+enum Diff<'a, M: Model> {
+    Insert(&'a Html<M>),
+    Replace(&'a Html<M>),
     Remove,
     Update {
-        attrs: bool,
-        events: bool,
-        children: Vec<(u32, Diff)>,
+        attrs: &'a [Attribute],
+        events: &'a [Event<M>],
+        children: Vec<(u32, Diff<'a, M>)>,
     },
     Unchanged,
 }
 
-impl Debug for Diff {
+impl<'a, M: Model> Debug for Diff<'a, M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Diff::*;
         let txt = match self {
-            Create => "Create",
-            Replace => "Replace",
+            Insert(_) => "Insert",
+            Replace(_) => "Replace",
             Remove => "Remove",
             Unchanged => "Unchanged",
             Update {
-                text,
                 attrs,
                 events,
                 children,
             } => {
                 write!(f, "Update {{ ")?;
-                if *text {
-                    write!(f, "text ")?;
-                }
-                if *attrs {
+                if !attrs.is_empty() {
                     write!(f, "attrs ")?;
                 }
-                if *events {
+                if !events.is_empty() {
                     write!(f, "events ")?;
                 }
                 if !children.is_empty() {
@@ -290,7 +279,7 @@ impl Debug for Diff {
     }
 }
 
-impl Diff {
+impl<'a, M: Model> Diff<'a, M> {
     fn is_unchanged(&self) -> bool {
         if let Diff::Unchanged = self {
             true
@@ -300,84 +289,101 @@ impl Diff {
     }
 }
 
-fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
-    unimplemented!()
-}
+fn diff_vdom<'a, M: Model>(old: &Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
+    let (old_el, new_el) = match (old, new) {
+        (Html::Text(t1), Html::Text(t2)) => {
+            return if t1 == t2 {
+                Diff::Unchanged
+            } else {
+                Diff::Replace(new)
+            }
+        }
+        (Html::Element(e1), Html::Element(e2)) => (e1, e2),
+        _ => return Diff::Replace(new),
+    };
 
-fn diff_elems<M: Model>(current: &Element<M>, next: &Element<M>) -> Diff {
-    if current.tag != next.tag {
+    if old_el.tag != new_el.tag {
         // assume everything can be nuked
-        return Diff::Replace;
+        return Diff::Replace(new);
     }
 
-    let attrs_changed = current.attrs != next.attrs;
-    let events_changed = current.events != next.events;
+    let attrs = if old_el.attrs == new_el.attrs {
+        &[]
+    } else {
+        &new_el.attrs[..]
+    };
+    let events = if old_el.events == new_el.events {
+        &[]
+    } else {
+        &new_el.events[..]
+    };
 
     let mut child_diffs = Vec::new();
 
-    // Find nodes which have been added/removed
-    // TODO better way to detect 'inserted' nodes with some kind of uuid
-    let curct = current.children.len() as isize;
-    let nextct = next.children.len() as isize;
-    if nextct > curct {
-        for ix in 0..(nextct - curct) {
-            child_diffs.push(((ix + curct) as u32, Diff::Create))
-        }
-    } else {
-        for ix in 0..(curct - nextct) {
-            child_diffs.push(((ix + nextct) as u32, Diff::Remove))
-        }
-    }
-
-    for (ix, (old, new)) in current
+    for (ix, (cold, cnew)) in old_el
         .children
         .iter()
-        .zip(next.children.iter())
+        .zip(new_el.children.iter())
         .enumerate()
     {
-        let diff = diff_vdom(old, new);
+        let diff = diff_vdom(cold, cnew);
         if !diff.is_unchanged() {
-            child_diffs.push((ix as u32, diff_vdom(old, new)))
+            child_diffs.push((ix as u32, diff_vdom(cold, cnew)))
         }
     }
 
-    if !attrs_changed && !events_changed && child_diffs.is_empty() {
+    // Find nodes which have been added/removed
+    // TODO better way to detect 'inserted' nodes with some kind of uuid
+    let curct = old_el.children.len();
+    let nextct = new_el.children.len();
+    if nextct > curct {
+        for ix in curct..nextct {
+            child_diffs.push((ix as u32, Diff::Insert(&new_el.children[ix])));
+        }
+    } else {
+        for ix in nextct..curct {
+            child_diffs.push((ix as u32, Diff::Remove))
+        }
+    }
+
+    if attrs.is_empty() && events.is_empty() && child_diffs.is_empty() {
         Diff::Unchanged
     } else {
         Diff::Update {
-            attrs: attrs_changed,
-            events: events_changed,
+            attrs,
+            events,
             children: child_diffs,
         }
     }
 }
 
-fn render_diff<M: Model>(
-    this_vnode: &Html<M>,
-    child_diffs: &[(u32, Diff)],
-    this_el: &DomElement,
+fn render_diff<'a, M: Model>(
+    this_el: &Node,
+    child_diffs: &[(u32, Diff<'a, M>)],
     doc: &Document,
 ) -> JsResult<()> {
     // This might seem slightly odd. Why are we applying changes to the children
     // rather than this_el? Because we need to create, remove, replace them and
     // these operations can only be done from the parent node
-    let child_els = this_el.children();
+    if child_diffs.is_empty() {
+        return Ok(());
+    }
+    let child_els = this_el.child_nodes();
     for &(ix, ref diff) in child_diffs {
         match diff {
             Diff::Unchanged => (),
-            Diff::Create => {
-                let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
-                this_el.append_child(&*new_el)?;
+            Diff::Insert(node) => {
+                let new_el = node.render_to_html(doc)?;
+                // XXX insert child
+                this_el.append_child(&new_el)?;
             }
-            Diff::Replace => {
-                let old_el = child_els
-                    .get_with_index(ix)
-                    .expect("bad replace node index");
-                let new_el = this_vnode.children[ix as usize].render_to_dom(doc)?;
-                this_el.replace_child(&*new_el, &old_el)?;
+            Diff::Replace(node) => {
+                let old_el = child_els.get(ix).expect("bad replace node index");
+                let new_el = node.render_to_html(doc)?;
+                this_el.replace_child(&new_el, &old_el)?;
             }
             Diff::Remove => {
-                let old_el = child_els.get_with_index(ix).expect("bad remove node index");
+                let old_el = child_els.get(ix).expect("bad remove node index");
                 this_el.remove_child(&old_el)?;
             }
             Diff::Update {
@@ -385,19 +391,16 @@ fn render_diff<M: Model>(
                 events,
                 children,
             } => {
-                let child_vnode = &this_vnode.children[ix as usize];
-                let mut child_el: DomElement =
-                    child_els.get_with_index(ix).expect("bad node index");
-                if *events {
-                    child_el = child_vnode.replace_events(&child_el)?;
+                let mut child_el: Node = child_els.get(ix).expect("bad node index");
+                if !events.is_empty() {
+                    let el: &DomElement = child_el.dyn_ref().expect("Not an element");
+                    child_el = replace_events(&el, events)?.unchecked_into();
                 }
-                if *text {
-                    child_el.set_text_content(child_vnode.text.as_ref().map(|t| t.borrow()));
+                if !attrs.is_empty() {
+                    let el: &DomElement = child_el.dyn_ref().expect("Not an element");
+                    reapply_attrs(&el, attrs)?;
                 }
-                if *attrs {
-                    child_vnode.reapply_attrs(&child_el)?;
-                }
-                render_diff(&child_vnode, &*children, &child_el, doc)?;
+                render_diff(&child_el, &*children, doc)?;
             }
         }
     }
@@ -417,7 +420,25 @@ pub enum Cmd<Msg> {
 #[derive(Debug, From)]
 pub enum Html<M: Model> {
     Text(Str),
-    Elememt(Element<M>),
+    Element(Element<M>),
+}
+
+impl<M: Model> std::fmt::Display for Html<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Html::Text(text) => write!(f, "{}", text),
+            Html::Element(elem) => write!(f, "{}", elem),
+        }
+    }
+}
+
+impl<M: Model> Html<M> {
+    fn render_to_html(&self, doc: &Document) -> JsResult<Node> {
+        match self {
+            Html::Text(text) => Text::new_with_data(text).map(|t| t.unchecked_into()),
+            Html::Element(elem) => elem.render_to_html(doc).map(|t| t.unchecked_into()),
+        }
+    }
 }
 
 #[derive(Debug, Constructor)]
@@ -439,9 +460,6 @@ impl<M: Model> Element<M> {
 impl<M: Model> std::fmt::Display for Element<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "<{}>", self.tag)?;
-        if let Some(text) = &self.text {
-            write!(f, "{}", text)?;
-        }
         for c in &self.children {
             write!(f, "{}", c)?;
         }
@@ -557,47 +575,44 @@ impl<M: Model> Element<M> {
         Ok(())
     }
 
-    fn reapply_attrs(&self, element: &DomElement) -> JsResult<()> {
-        for attr in &self.attrs {
-            apply_attr_to_elem(attr, element)?
-        }
-        Ok(())
-    }
-
-    fn replace_events(&self, element: &DomElement) -> JsResult<DomElement> {
-        log!("Replacing listeners");
-
-        // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
-        // Stupid hack IMO
-        let new_element = element.clone_node_with_deep(true)?;
-        let new_element: DomElement = new_element.dyn_into()?;
-
-        element
-            .parent_node()
-            .unwrap()
-            .replace_child(&new_element, &element)?;
-        for event in &self.events {
-            let listener = attach_event_listener(event, &new_element)?;
-            // TODO stop leaking the listener!
-            Box::leak(Box::new(listener));
-        }
-        Ok(new_element)
-    }
-
-    fn render_to_dom(&self, document: &Document) -> JsResult<DomElement> {
+    fn render_to_html(&self, document: &Document) -> JsResult<DomElement> {
         let element = document.create_element(&self.tag.to_string())?;
         self.apply_attrs(&element)?;
-        if let Some(text) = &self.text {
-            element.set_text_content(Some(text.borrow()))
-        }
         for event in &self.events {
             let listener = attach_event_listener(event, &element)?;
             Box::leak(Box::new(listener));
         }
         for child in &self.children {
-            let child_elem = child.render_to_dom(document)?;
-            element.append_child(&*child_elem)?;
+            let child_elem = child.render_to_html(document)?;
+            element.append_child(&child_elem)?;
         }
         Ok(element)
     }
+}
+
+fn replace_events<M: Model>(element: &DomElement, events: &[Event<M>]) -> JsResult<DomElement> {
+    log!("Replacing listeners");
+
+    // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
+    // Stupid hack IMO
+    let new_element = element.clone_node_with_deep(true)?;
+    let new_element: DomElement = new_element.dyn_into()?;
+
+    element
+        .parent_node()
+        .unwrap()
+        .replace_child(&new_element, &element)?;
+    for event in events {
+        let listener = attach_event_listener(event, &new_element)?;
+        // TODO stop leaking the listener!
+        Box::leak(Box::new(listener));
+    }
+    Ok(new_element)
+}
+
+fn reapply_attrs(element: &DomElement, attrs: &[Attribute]) -> JsResult<()> {
+    for attr in attrs {
+        apply_attr_to_elem(attr, element)?
+    }
+    Ok(())
 }
