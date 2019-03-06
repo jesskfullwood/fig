@@ -1,4 +1,4 @@
-use crate::{Html, Model, Str};
+use crate::{Element, Html, Model, Str};
 use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -26,9 +26,9 @@ macro_rules! make_html_tags {
             macro_rules! $text {
                 ($d($modifier:expr),* $d(,)?) => {
                     {
-                        use $crate::{Html, html::{Tag, ElemMod}};
-                        let mut html = Html::tag(Tag::$typ);
-                        $d($modifier.modify_element(&mut html);)*;
+                        use $crate::{Element, html::{Tag, ElemMod}};
+                        let mut element = Element::tag(Tag::$typ);
+                        $d($modifier.modify_element(&mut element);)*;
                         html
                     }
                 }
@@ -258,36 +258,23 @@ impl<S: Into<Str>> Classify for S {
 }
 
 pub trait ElemMod<M: Model> {
-    fn modify_element(self, elem: &mut Html<M>);
+    fn modify_element(self, elem: &mut Element<M>);
 }
 
 impl<M: Model> ElemMod<M> for &'static str {
-    fn modify_element(self, elem: &mut Html<M>) {
-        if elem.text.is_some() {
-            let mut s: String = elem.text.take().unwrap().into_owned();
-            s.push_str(&self);
-            elem.text = Some(s.into())
-        } else {
-            elem.text = Some(self.into())
-        }
+    fn modify_element(self, elem: &mut Element<M>) {
+        elem.children.push(Html::from(self.into()))
     }
 }
 
-// TODO exact duplicate of above :/
 impl<M: Model> ElemMod<M> for String {
-    fn modify_element(self, elem: &mut Html<M>) {
-        if elem.text.is_some() {
-            let mut s: String = elem.text.take().unwrap().into_owned();
-            s.push_str(&self);
-            elem.text = Some(s.into())
-        } else {
-            elem.text = Some(self.into())
-        }
+    fn modify_element(self, elem: &mut Element<M>) {
+        elem.children.push(Html::from(self.into()))
     }
 }
 
 impl<M: Model, E: ElemMod<M>> ElemMod<M> for Vec<E> {
-    fn modify_element(self, elem: &mut Html<M>) {
+    fn modify_element(self, elem: &mut Element<M>) {
         for modifier in self {
             modifier.modify_element(elem)
         }
@@ -295,19 +282,19 @@ impl<M: Model, E: ElemMod<M>> ElemMod<M> for Vec<E> {
 }
 
 impl<M: Model> ElemMod<M> for Attribute {
-    fn modify_element(self, elem: &mut Html<M>) {
+    fn modify_element(self, elem: &mut Element<M>) {
         elem.attrs.push(self)
     }
 }
 
 impl<M: Model> ElemMod<M> for Event<M> {
-    fn modify_element(self, elem: &mut Html<M>) {
+    fn modify_element(self, elem: &mut Element<M>) {
         elem.events.push(self)
     }
 }
 
 impl<M: Model> ElemMod<M> for Html<M> {
-    fn modify_element(self, elem: &mut Html<M>) {
+    fn modify_element(self, elem: &mut Element<M>) {
         elem.children.push(self)
     }
 }

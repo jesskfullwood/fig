@@ -1,8 +1,9 @@
-use derive_more::Constructor;
+use derive_more::{Constructor, From};
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::{
-    Document, Element, Event as DomEvent, HtmlDivElement, HtmlElement, Location, Window,
+    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, HtmlElement, Location,
+    Window,
 };
 
 use std::borrow::Cow;
@@ -29,20 +30,20 @@ pub trait Model: 'static + Debug {
 
 type Str = Cow<'static, str>;
 
-fn get_str_prop(elem: &Element, key: &str) -> JsResult<String> {
+fn get_str_prop(elem: &DomElement, key: &str) -> JsResult<String> {
     let key = JsValue::from_str(key);
     js_sys::Reflect::get(elem, &key).and_then(|val| val.as_string().ok_or(val))
 }
 
 fn intercept_links<M: Model>(
     location: Location,
-    root: Element,
+    root: DomElement,
     handler: fn(UrlRequest) -> Cmd<M::Msg>,
 ) -> JsResult<Listener<M>> {
     log!("Intercepting links");
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
         let target: web_sys::EventTarget = event.target().expect("Missing target");
-        let target_el: &Element = target.dyn_ref().expect("Not an Element");
+        let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
         if target_el.tag_name() != "A" {
             // short circuit
             return Cmd::None;
@@ -145,7 +146,12 @@ impl<M: Model> App<M> {
             log!("No change");
         } else {
             log!("vdom diff: {:?}", diff);
-            let mut tmp_div = Html::new(Tag::Div, None, Vec::new(), Vec::new(), vec![new_vdom]);
+            let mut tmp_div = Html::from(Element::new(
+                Tag::Div,
+                Vec::new(),
+                Vec::new(),
+                vec![new_vdom],
+            ));
             let document = self.window.document().expect("No document");
             render_diff(&tmp_div, &[(0, diff)], &self.target, &document)?;
             new_vdom = tmp_div.children.remove(0);
@@ -189,7 +195,7 @@ pub fn run<M: Model>(
         .get_element_by_id(target)
         .expect("Target element not found");
     let target: HtmlDivElement = target.dyn_into()?;
-    let downcast_cpy: Element = target.clone().dyn_into().unwrap();
+    let downcast_cpy: DomElement = target.clone().dyn_into().unwrap();
     let initial = document.create_element(&Tag::Div.to_string())?;
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
@@ -201,7 +207,7 @@ pub fn run<M: Model>(
         view,
         on_url_request,
         on_url_change,
-        current_vdom: Html::tag(Tag::Div), // now the dom and vdom are in sync
+        current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
     };
 
     // put app on the heap...
@@ -239,7 +245,6 @@ enum Diff {
     Replace,
     Remove,
     Update {
-        text: bool,
         attrs: bool,
         events: bool,
         children: Vec<(u32, Diff)>,
@@ -296,12 +301,15 @@ impl Diff {
 }
 
 fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
+    unimplemented!()
+}
+
+fn diff_elems<M: Model>(current: &Element<M>, next: &Element<M>) -> Diff {
     if current.tag != next.tag {
         // assume everything can be nuked
         return Diff::Replace;
     }
 
-    let text_changed = current.text != next.text;
     let attrs_changed = current.attrs != next.attrs;
     let events_changed = current.events != next.events;
 
@@ -333,11 +341,10 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
         }
     }
 
-    if !text_changed && !attrs_changed && !events_changed && child_diffs.is_empty() {
+    if !attrs_changed && !events_changed && child_diffs.is_empty() {
         Diff::Unchanged
     } else {
         Diff::Update {
-            text: text_changed,
             attrs: attrs_changed,
             events: events_changed,
             children: child_diffs,
@@ -348,7 +355,7 @@ fn diff_vdom<M: Model>(current: &Html<M>, next: &Html<M>) -> Diff {
 fn render_diff<M: Model>(
     this_vnode: &Html<M>,
     child_diffs: &[(u32, Diff)],
-    this_el: &Element,
+    this_el: &DomElement,
     doc: &Document,
 ) -> JsResult<()> {
     // This might seem slightly odd. Why are we applying changes to the children
@@ -374,13 +381,13 @@ fn render_diff<M: Model>(
                 this_el.remove_child(&old_el)?;
             }
             Diff::Update {
-                text,
                 attrs,
                 events,
                 children,
             } => {
                 let child_vnode = &this_vnode.children[ix as usize];
-                let mut child_el: Element = child_els.get_with_index(ix).expect("bad node index");
+                let mut child_el: DomElement =
+                    child_els.get_with_index(ix).expect("bad node index");
                 if *events {
                     child_el = child_vnode.replace_events(&child_el)?;
                 }
@@ -405,24 +412,31 @@ pub enum Cmd<Msg> {
     PushUrl(url::Url),
 }
 
+// See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
+/// A DOM Node
+#[derive(Debug, From)]
+pub enum Html<M: Model> {
+    Text(Str),
+    Elememt(Element<M>),
+}
+
 #[derive(Debug, Constructor)]
 /// Represents an HTML node
-pub struct Html<M: Model> {
+pub struct Element<M: Model> {
     tag: Tag,
-    text: Option<Str>,
     attrs: Vec<Attribute>,
     events: Vec<Event<M>>,
     children: Vec<Html<M>>,
 }
 
-impl<M: Model> Html<M> {
+impl<M: Model> Element<M> {
     /// Create an empty tagged element
-    pub fn tag(tag: Tag) -> Html<M> {
-        Html::new(tag, None, Vec::new(), Vec::new(), Vec::new())
+    pub fn tag(tag: Tag) -> Element<M> {
+        Element::new(tag, Vec::new(), Vec::new(), Vec::new())
     }
 }
 
-impl<M: Model> std::fmt::Display for Html<M> {
+impl<M: Model> std::fmt::Display for Element<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "<{}>", self.tag)?;
         if let Some(text) = &self.text {
@@ -438,7 +452,7 @@ impl<M: Model> std::fmt::Display for Html<M> {
 /// Represents a listener attached to the DOM.
 /// When it is dropped it will detach the corresponding listener.
 pub struct Listener<M: Model> {
-    element: Element,
+    element: DomElement,
     type_: Str,
     closure: Closure<FnMut(DomEvent)>,
     marker: std::marker::PhantomData<M>,
@@ -460,7 +474,7 @@ impl<M: Model> Debug for Listener<M> {
 }
 
 impl<M: Model> Listener<M> {
-    fn new(element: Element, type_: Str, closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
+    fn new(element: DomElement, type_: Str, closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
         Listener {
             element,
             type_,
@@ -471,7 +485,7 @@ impl<M: Model> Listener<M> {
 }
 
 fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
-    element: Element,
+    element: DomElement,
     event_name: S,
     handler: F,
 ) -> JsResult<Listener<M>> {
@@ -491,7 +505,7 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'stati
 }
 
 fn input_handler<M: Model>(
-    element: &Element,
+    element: &DomElement,
     handler: Rc<dyn Fn(String) -> M::Msg>,
 ) -> JsResult<Listener<M>> {
     let inner = move |event: DomEvent| {
@@ -505,21 +519,24 @@ fn input_handler<M: Model>(
 }
 
 fn click_handler<M: Model>(
-    element: &Element,
+    element: &DomElement,
     handler: Rc<dyn Fn() -> M::Msg>,
 ) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| Cmd::Msg(handler());
     event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
-fn attach_event_listener<M: Model>(event: &Event<M>, element: &Element) -> JsResult<Listener<M>> {
+fn attach_event_listener<M: Model>(
+    event: &Event<M>,
+    element: &DomElement,
+) -> JsResult<Listener<M>> {
     match event {
         Event::OnClick { cb, .. } => click_handler::<M>(&element, cb.clone()),
         Event::OnInput { cb, .. } => input_handler::<M>(&element, cb.clone()),
     }
 }
 
-fn apply_attr_to_elem(attr: &Attribute, element: &Element) -> JsResult<()> {
+fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
     use Attribute::*;
     match attr {
         Class(classes) => element.set_attribute("class", &classes.join(" "))?,
@@ -532,28 +549,28 @@ fn apply_attr_to_elem(attr: &Attribute, element: &Element) -> JsResult<()> {
     Ok(())
 }
 
-impl<M: Model> Html<M> {
-    fn apply_attrs(&self, element: &Element) -> JsResult<()> {
+impl<M: Model> Element<M> {
+    fn apply_attrs(&self, element: &DomElement) -> JsResult<()> {
         for attr in &self.attrs {
             apply_attr_to_elem(attr, element)?
         }
         Ok(())
     }
 
-    fn reapply_attrs(&self, element: &Element) -> JsResult<()> {
+    fn reapply_attrs(&self, element: &DomElement) -> JsResult<()> {
         for attr in &self.attrs {
             apply_attr_to_elem(attr, element)?
         }
         Ok(())
     }
 
-    fn replace_events(&self, element: &Element) -> JsResult<Element> {
+    fn replace_events(&self, element: &DomElement) -> JsResult<DomElement> {
         log!("Replacing listeners");
 
         // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
         // Stupid hack IMO
         let new_element = element.clone_node_with_deep(true)?;
-        let new_element: Element = new_element.dyn_into()?;
+        let new_element: DomElement = new_element.dyn_into()?;
 
         element
             .parent_node()
@@ -567,7 +584,7 @@ impl<M: Model> Html<M> {
         Ok(new_element)
     }
 
-    fn render_to_dom(&self, document: &Document) -> JsResult<Element> {
+    fn render_to_dom(&self, document: &Document) -> JsResult<DomElement> {
         let element = document.create_element(&self.tag.to_string())?;
         self.apply_attrs(&element)?;
         if let Some(text) = &self.text {
