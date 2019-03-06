@@ -4,6 +4,7 @@ use tree::fetch;
 use tree::html::*;
 use tree::select;
 use tree::*;
+// TODO remove this dependency
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone)]

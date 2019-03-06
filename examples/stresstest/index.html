@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+        <meta name="description" content="">
+        <link rel="stylesheet"  href="/style.css">
+        <title>Stress test</title>
+    </head>
+    <body>
+        <div id="app"></div>
+        <script src='/pkg/package.js'></script>
+
+        <script>
+         const { render } = wasm_bindgen;
+         function run() {
+             render();
+         }
+         wasm_bindgen('/pkg/package_bg.wasm')
+             .then(run)
+             .catch(console.error);
+        </script>
+    </body>
+</html>
