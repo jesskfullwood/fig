@@ -149,6 +149,8 @@ impl<M: Model> App<M> {
     }
 }
 
+pub struct Key();
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UrlRequest {
     Internal(url::Url),
@@ -395,37 +397,11 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
-pub struct Timer {
-    id: i32,
-    #[allow(dead_code)]
-    cb: Closure<FnMut()>,
-}
-
-impl Timer {
-    pub fn set_interval<M: Model>(
-        window: &Window,
-        interval_ms: i32,
-        f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
-    ) -> JsResult<Timer> {
-        let cl = move || -> Cmd<M::Msg> {
-            App::<M>::with(|app| f(app.model.as_ref().expect("No model")))
-        };
-        let cb = closure0::<M, _>(cl);
-        let jsfunction = cb.as_ref().unchecked_ref();
-        window
-            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, interval_ms)
-            .map(|id| Timer { id, cb })
-    }
-}
-
-impl Drop for Timer {
-    fn drop(&mut self) {
-        web_sys::window()
-            .map(|window| {
-                window.clear_interval_with_handle(self.id);
-            })
-            .unwrap_or(())
-    }
+pub fn subscription_handle<M: Model>(
+    _key: Key,
+    f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
+) -> impl Fn() -> Cmd<M::Msg> {
+    move || -> Cmd<M::Msg> { App::<M>::with(|app| f(app.model.as_ref().expect("No model"))) }
 }
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
@@ -646,4 +622,51 @@ fn reapply_attrs(element: &DomElement, attrs: &[Attribute]) -> JsResult<()> {
         apply_attr_to_elem(attr, element)?
     }
     Ok(())
+}
+
+pub struct Timer<M: Model> {
+    id: i32,
+    interval_ms: u32,
+    #[allow(dead_code)]
+    cb: Closure<FnMut()>,
+    _marker: std::marker::PhantomData<M>,
+}
+
+impl<M: Model + Debug> Debug for Timer<M> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Timer {{ interval_ms: {} }}", self.interval_ms)
+    }
+}
+
+impl<M: Model> Timer<M> {
+    pub fn new(
+        key: Key,
+        interval_ms: u32,
+        f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
+    ) -> JsResult<Timer<M>> {
+        // XXX Technically this is not typesafe - the user
+        // could 'lie' about the type of M and we cannot enforce it
+        let handle = subscription_handle(key, f);
+        let cb = closure0::<M, _>(handle);
+        let jsfunction = cb.as_ref().unchecked_ref();
+        let window = web_sys::window().expect("No global `window` exists");
+        window
+            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, interval_ms as i32)
+            .map(|id| Timer {
+                id,
+                interval_ms,
+                cb,
+                _marker: std::marker::PhantomData,
+            })
+    }
+}
+
+impl<M: Model> Drop for Timer<M> {
+    fn drop(&mut self) {
+        web_sys::window()
+            .map(|window| {
+                window.clear_interval_with_handle(self.id);
+            })
+            .unwrap_or(())
+    }
 }

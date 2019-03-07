@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 [dependencies]
 tree = { path = "../../" }
 wasm-bindgen = "0.2.37"
-rand = "0.6.5"
+rand = { version = "0.6.5", features = ["wasm-bindgen"] }

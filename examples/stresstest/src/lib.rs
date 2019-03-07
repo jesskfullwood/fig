@@ -1,19 +1,13 @@
+use rand::Rng;
 use std::collections::BTreeMap;
 use tree::html::*;
 use tree::*;
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Model {
     divs: BTreeMap<u32, String>,
-}
-
-impl Default for Model {
-    fn default() -> Model {
-        Model {
-            divs: BTreeMap::new(),
-        }
-    }
+    timer: Timer<Model>,
 }
 
 #[derive(Clone, Debug)]
@@ -25,11 +19,12 @@ impl tree::Model for Model {
     type Msg = Msg;
 }
 
-fn update(msg: Msg, mut model: Model) -> Model {
+fn update(msg: Msg, mut model: Model) -> (Model, Cmd<Msg>) {
     match msg {
         Msg::Roll(id, text) => {
+            log!("Roll!");
             model.divs.insert(id, text);
-            model
+            (model, Cmd::none())
         }
     }
 }
@@ -48,5 +43,27 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::sandbox(Model::default(), view, update, "app").expect("Failed to run");
+    tree::application(
+        |key, _| {
+            (
+                Model {
+                    divs: BTreeMap::new(),
+                    timer: Timer::new(key, 10, |_| {
+                        let mut rng = rand::thread_rng();
+                        let n: u32 = rng.gen_range(0, 1000);
+                        let text = if n % 2 == 0 { "Hello" } else { "Goodbye" };
+                        Cmd::msg(Msg::Roll(n, text.into()))
+                    })
+                    .expect("No timer"),
+                },
+                Cmd::none(),
+            )
+        },
+        view,
+        update,
+        tree::program::on_url_request_default,
+        |_| unimplemented!(),
+        "app",
+    )
+    .expect("Failed to run");
 }

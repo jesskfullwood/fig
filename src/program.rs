@@ -1,5 +1,5 @@
 use crate::{
-    intercept_links, App, Cmd, Element, Html, JsResult, JsValue, Model, Tag, UrlRequest, APP,
+    intercept_links, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Tag, UrlRequest, APP,
 };
 use wasm_bindgen::JsCast;
 
@@ -21,7 +21,7 @@ pub fn sandbox<M: Model>(
     target: &str,
 ) -> JsResult<()> {
     application(
-        |_| (init, Cmd::none()),
+        |_, _| (init, Cmd::none()),
         view,
         move |msg, model| (update(msg, model), Cmd::none()),
         // on url change, just force a load
@@ -35,7 +35,7 @@ pub fn sandbox<M: Model>(
 
 /// Run a single-page application, including routing and HTTP requests
 pub fn application<M: Model>(
-    init: impl FnOnce(url::Url) -> (M, Cmd<M::Msg>),
+    init: impl FnOnce(Key, url::Url) -> (M, Cmd<M::Msg>),
     view: impl Fn(&M) -> Html<M> + 'static,
     update: impl Fn(M::Msg, M) -> (M, Cmd<M::Msg>) + 'static,
     on_url_request: impl Fn(UrlRequest) -> Cmd<M::Msg> + 'static,
@@ -56,12 +56,10 @@ pub fn application<M: Model>(
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
 
-    let (model, initcmd) = init(url);
-
     let app = App {
         window,
         target,
-        model: Some(model),
+        model: None,
         update: Box::new(update),
         view: Box::new(view),
         on_url_change: Box::new(on_url_change),
@@ -83,9 +81,13 @@ pub fn application<M: Model>(
         }
     });
 
+    // Now we prepare to initialize
+    let (model, initcmd) = init(Key(), url);
+
     // From this point on we only interact with App through App::with.
     // Then it's safe, hopefully.
     App::<M>::with(|app| {
+        app.model = Some(model);
         // Run initial command, then rerender just to be sure
         app.loop_update(initcmd)
     })?;

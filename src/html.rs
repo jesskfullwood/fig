@@ -125,9 +125,11 @@ impl_to_html!(A, B, C, D, E, F, G, H, I, J);
 impl_to_html!(A, B, C, D, E, F, G, H, I, J, K);
 impl_to_html!(A, B, C, D, E, F, G, H, I, J, K, L);
 
+pub use web_sys::console::log_1;
+
 #[macro_export]
 macro_rules! log {
-    ($($t:tt)*) => (web_sys::console::log_1(&format_args!($($t)*).to_string().into()))
+    ($($t:tt)*) => ($crate::html::log_1(&format_args!($($t)*).to_string().into()))
 }
 
 #[derive(Debug, PartialEq)]
