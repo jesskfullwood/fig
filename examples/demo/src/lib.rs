@@ -39,14 +39,6 @@ enum Route {
     Summary,
 }
 
-fn on_url_request(req: tree::UrlRequest) -> Cmd<Msg> {
-    use tree::UrlRequest::*;
-    match req {
-        Internal(url) => Cmd::push_url(url.to_string()),
-        External(urlstr) => Cmd::load_url(urlstr),
-    }
-}
-
 fn on_url_change(url: url::Url) -> Cmd<Msg> {
     log!("Url change");
     let route = match url.path() {
@@ -210,10 +202,10 @@ fn view(model: &Model) -> Html<Model> {
 #[wasm_bindgen]
 pub fn render() {
     tree::application(
-        |url| (Model::default(), on_url_change(url)),
+        |_key, url| (Model::default(), on_url_change(url)),
         view,
         update,
-        on_url_request,
+        tree::program::on_url_request_intercept,
         on_url_change,
         "app",
     )

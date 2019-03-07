@@ -302,6 +302,7 @@ fn diff_vdom<'a, M: Model>(old: &Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
         }
     }
 
+    child_diffs.sort_by_key(|t| t.0);
     if attrs.is_empty() && events.is_empty() && child_diffs.is_empty() {
         Diff::Unchanged
     } else {
@@ -325,12 +326,16 @@ fn render_diff<'a, M: Model>(
         return Ok(());
     }
     let child_els = this_el.child_nodes();
-    for &(ix, ref diff) in child_diffs {
+    let mut rmct = 0;
+    for &(ix, ref diff) in child_diffs.iter() {
+        log!("{}: {:?}", ix, diff);
+        let ix = ix - rmct; // adjust index for previously-removed nodes
         match diff {
             Diff::Unchanged => (),
             Diff::Insert(node) => {
+                // Is there already a node at this index?
                 let new_el = node.render_to_html(doc)?;
-                // XXX insert child
+                // XXX insert child, not append!
                 this_el.append_child(&new_el)?;
             }
             Diff::Replace(node) => {
@@ -341,6 +346,7 @@ fn render_diff<'a, M: Model>(
             Diff::Remove => {
                 let old_el = child_els.get(ix).expect("bad remove node index");
                 this_el.remove_child(&old_el)?;
+                rmct += 1;
             }
             Diff::Update {
                 attrs,

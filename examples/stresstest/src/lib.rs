@@ -23,6 +23,9 @@ fn update(msg: Msg, mut model: Model) -> (Model, Cmd<Msg>) {
     match msg {
         Msg::Roll(id, text) => {
             log!("Roll!");
+            if model.divs.len() > 100 {
+                model.divs = BTreeMap::new();
+            }
             model.divs.insert(id, text);
             (model, Cmd::none())
         }
@@ -61,7 +64,7 @@ pub fn render() {
         },
         view,
         update,
-        tree::program::on_url_request_default,
+        tree::program::on_url_request_force_load,
         |_| unimplemented!(),
         "app",
     )

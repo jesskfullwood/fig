@@ -5,11 +5,20 @@ use wasm_bindgen::JsCast;
 
 use web_sys::{Element as DomElement, HtmlDivElement};
 
-/// Default Url request handler. Always forces a reload.
-pub fn on_url_request_default<Msg>(req: UrlRequest) -> Cmd<Msg> {
+/// Url request handler. Always forces a reload.
+pub fn on_url_request_force_load<Msg>(req: UrlRequest) -> Cmd<Msg> {
     match req {
         UrlRequest::Internal(url) => Cmd::load_url(url.to_string()),
         UrlRequest::External(urlstr) => Cmd::load_url(urlstr),
+    }
+}
+
+/// Default Url request handler. Pushes the url if internal, loads if external.
+pub fn on_url_request_intercept<Msg>(req: UrlRequest) -> Cmd<Msg> {
+    use UrlRequest::*;
+    match req {
+        Internal(url) => Cmd::push_url(url.to_string()),
+        External(urlstr) => Cmd::load_url(urlstr),
     }
 }
 
@@ -25,7 +34,7 @@ pub fn sandbox<M: Model>(
         view,
         move |msg, model| (update(msg, model), Cmd::none()),
         // on url change, just force a load
-        on_url_request_default,
+        on_url_request_force_load,
         // no way to create Cmd::push_url so no way to
         // trigger the url_changed handler
         |_| unreachable!(),
