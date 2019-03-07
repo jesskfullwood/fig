@@ -20,6 +20,9 @@ use html::{Attribute, Event, EventInner, Tag};
 
 pub mod fetch;
 pub mod html;
+pub mod program;
+
+pub use program::{application, sandbox};
 pub use url;
 
 pub use wasm_bindgen::JsValue;
@@ -44,8 +47,8 @@ struct App<M: Model> {
     model: Option<M>,
     update: Box<Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
     view: Box<Fn(&M) -> Html<M>>,
-    on_url_request: OnUrlRequestFn<M::Msg>,
-    on_url_change: OnUrlChangeFn<M::Msg>,
+    // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
+    on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
 }
 
@@ -152,106 +155,10 @@ pub enum UrlRequest {
     External(String),
 }
 
-/// Default Url request handler. Always forces a reload.
-pub fn on_url_request_default<Msg>(req: UrlRequest) -> Cmd<Msg> {
-    match req {
-        UrlRequest::Internal(url) => Cmd::load_url(url.to_string()),
-        UrlRequest::External(urlstr) => Cmd::load_url(urlstr),
-    }
-}
-
-/// Run a sandboxed application, ignoring HTTP and routing
-pub fn sandbox<M: Model>(
-    init: M,
-    view: impl Fn(&M) -> Html<M> + 'static,
-    update: impl Fn(M::Msg, M) -> M + 'static,
-    target: &str,
-) -> JsResult<()> {
-    application(
-        |_| (init, Cmd::none()),
-        view,
-        move |msg, model| (update(msg, model), Cmd::none()),
-        // on url change, just force a load
-        on_url_request_default,
-        // no way to create Cmd::push_url so no way to
-        // trigger the url_changed handler
-        |_| unreachable!(),
-        target,
-    )
-}
-
-// TODO rm
-type OnUrlRequestFn<Msg> = fn(UrlRequest) -> Cmd<Msg>;
-type OnUrlChangeFn<Msg> = fn(url::Url) -> Cmd<Msg>;
-
-/// Run a single-page application, including routing and HTTP requests
-pub fn application<M: Model>(
-    init: impl FnOnce(url::Url) -> (M, Cmd<M::Msg>),
-    view: impl Fn(&M) -> Html<M> + 'static,
-    update: impl Fn(M::Msg, M) -> (M, Cmd<M::Msg>) + 'static,
-    on_url_request: OnUrlRequestFn<M::Msg>,
-    on_url_change: OnUrlChangeFn<M::Msg>,
-    target: &str,
-) -> JsResult<()> {
-    console_error_panic_hook::set_once();
-    let window = web_sys::window().expect("No global `window` exists");
-    let document = window.document().expect("No document");
-    let location = document.location().expect("No location");
-    let url = url::Url::parse(&location.href()?).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let target = document
-        .get_element_by_id(target)
-        .expect("Target element not found");
-    let target: HtmlDivElement = target.dyn_into()?;
-    let downcast_cpy: DomElement = target.clone().dyn_into().unwrap();
-    let initial = document.create_element(&Tag::Div.to_string())?;
-    target.set_inner_html(""); // blank the target div and create an initial root
-    target.append_child(&*initial)?;
-
-    let (model, initcmd) = init(url);
-
-    let app = App {
-        window,
-        target,
-        model: Some(model),
-        update: Box::new(update),
-        view: Box::new(view),
-        on_url_request,
-        on_url_change,
-        current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
-    };
-
-    // put app on the heap...
-    let app = Box::new(app);
-    // and leak it so we can put it in a thread-local
-    let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut ();
-    // super unsafe. We swap our global void pointer to point to our app.
-    // We to do it this way because it isn't possible to have
-    // generics in globals. That is, the user of the library chooses their own Model
-    // so we can't know the full type of App in advance.
-    APP.with(move |ptr| {
-        let inner = ptr as *const *mut () as *mut *mut ();
-        unsafe {
-            *inner = app_ptr;
-        }
-    });
-
-    // From this point on we only interact with App through App::with.
-    // Then it's safe, hopefully.
-    App::<M>::with(|app| {
-        // Run initial command, then rerender just to be sure
-        app.loop_update(initcmd)
-    })?;
-
-    let link_listener = intercept_links::<M>(location, downcast_cpy, on_url_request)?;
-    Box::leak(Box::new(link_listener));
-
-    Ok(())
-}
-
-fn intercept_links<M: Model>(
+fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
     location: Location,
     root: DomElement,
-    handler: fn(UrlRequest) -> Cmd<M::Msg>,
+    handler: F,
 ) -> JsResult<Listener<M>> {
     log!("Intercepting links");
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
@@ -488,6 +395,39 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
+pub struct Timer {
+    id: i32,
+    #[allow(dead_code)]
+    cb: Closure<FnMut()>,
+}
+
+impl Timer {
+    pub fn set_interval<M: Model>(
+        window: &Window,
+        interval_ms: i32,
+        f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
+    ) -> JsResult<Timer> {
+        let cl = move || -> Cmd<M::Msg> {
+            App::<M>::with(|app| f(app.model.as_ref().expect("No model")))
+        };
+        let cb = closure0::<M, _>(cl);
+        let jsfunction = cb.as_ref().unchecked_ref();
+        window
+            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, interval_ms)
+            .map(|id| Timer { id, cb })
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        web_sys::window()
+            .map(|window| {
+                window.clear_interval_with_handle(self.id);
+            })
+            .unwrap_or(())
+    }
+}
+
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
 /// Represents a DOM Node
 #[derive(Debug, From)]
@@ -575,6 +515,31 @@ impl<M: Model> Listener<M> {
     }
 }
 
+fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(mut handler: F) -> Closure<FnMut()> {
+    Closure::wrap(Box::new(move || {
+        web_sys::console::time();
+        let cmd = handler();
+        App::<M>::with(move |app| {
+            app.loop_update(cmd).expect("Update error");
+        });
+        web_sys::console::time_end();
+    }) as Box<FnMut()>)
+}
+
+fn closure1<M: Model, T, F: FnMut(T) -> Cmd<M::Msg> + 'static>(mut handler: F) -> Closure<FnMut(T)>
+where
+    T: wasm_bindgen::convert::FromWasmAbi + 'static,
+{
+    Closure::wrap(Box::new(move |val: T| {
+        web_sys::console::time();
+        let cmd = handler(val);
+        App::<M>::with(move |app| {
+            app.loop_update(cmd).expect("Update error");
+        });
+        web_sys::console::time_end();
+    }) as Box<FnMut(T)>)
+}
+
 fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
     element: DomElement,
     event_name: S,
@@ -582,17 +547,10 @@ fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'stati
 ) -> JsResult<Listener<M>> {
     let event_name = event_name.into();
     log!("New event hander closure");
-    let closure = Closure::wrap(Box::new(move |event: DomEvent| {
-        web_sys::console::time();
-        let cmd = handler(event);
-        App::<M>::with(move |app| {
-            app.loop_update(cmd).expect("Update error");
-        });
-        web_sys::console::time_end();
-    }) as Box<FnMut(DomEvent)>);
-    let jsfunction = closure.as_ref().unchecked_ref();
+    let cb = closure1::<M, _, _>(handler);
+    let jsfunction = cb.as_ref().unchecked_ref();
     element.add_event_listener_with_callback(&event_name, jsfunction)?;
-    Ok(Listener::new(element, event_name, closure))
+    Ok(Listener::new(element, event_name, cb))
 }
 
 fn input_handler<M: Model>(
