@@ -25,11 +25,11 @@ impl tree::Model for Model {
     type Msg = Msg;
 }
 
-fn update(msg: Msg, mut model: Model) -> (Model, Cmd<Msg>) {
+fn update(msg: Msg, mut model: Model) -> Model {
     match msg {
         Msg::Roll(id, text) => {
             model.divs.insert(id, text);
-            (model, Cmd::none())
+            model
         }
     }
 }
@@ -48,14 +48,5 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(
-        |_| (Model::default(), Cmd::none()),
-        update,
-        view,
-        // TODO create a sandbox function
-        |_| unimplemented!(),
-        |_| unimplemented!(),
-        "app",
-    )
-    .expect("Failed to run");
+    tree::sandbox(Model::default(), view, update, "app").expect("Failed to run");
 }

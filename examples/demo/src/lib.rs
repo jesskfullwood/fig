@@ -209,10 +209,10 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::run(
+    tree::application(
         |url| (Model::default(), on_url_change(url)),
-        update,
         view,
+        update,
         on_url_request,
         on_url_change,
         "app",

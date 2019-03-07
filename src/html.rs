@@ -51,6 +51,7 @@ make_html_tags! {
     H2 => h2,
     H3 => h3,
     H4 => h4,
+    Hr => hr,
     I => i,
     Input => input,
     Li => li,

@@ -5,7 +5,7 @@
 
 use derive_more::{Constructor, From};
 use futures::Future;
-use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
     Document, Element as DomElement, Event as DomEvent, HtmlDivElement, HtmlElement, Location,
     Node, Text, Window,
@@ -22,10 +22,7 @@ pub mod fetch;
 pub mod html;
 pub use url;
 
-type UpdateFn<Model, Msg> = fn(Msg, Model) -> (Model, Cmd<Msg>);
-type ViewFn<Model> = fn(&Model) -> Html<Model>;
-type OnUrlRequestFn<Msg> = fn(UrlRequest) -> Cmd<Msg>;
-type OnUrlChangeFn<Msg> = fn(url::Url) -> Cmd<Msg>;
+pub use wasm_bindgen::JsValue;
 
 type JsResult<T> = Result<T, JsValue>;
 
@@ -41,42 +38,12 @@ fn get_str_prop(elem: &DomElement, key: &str) -> JsResult<String> {
     js_sys::Reflect::get(elem, &key).and_then(|val| val.as_string().ok_or(val))
 }
 
-fn intercept_links<M: Model>(
-    location: Location,
-    root: DomElement,
-    handler: fn(UrlRequest) -> Cmd<M::Msg>,
-) -> JsResult<Listener<M>> {
-    log!("Intercepting links");
-    let cb = move |event: DomEvent| -> Cmd<M::Msg> {
-        let target: web_sys::EventTarget = event.target().expect("Missing target");
-        let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
-        if target_el.tag_name() != "A" {
-            // short circuit
-            return Cmd::none();
-        }
-        event.prevent_default();
-        let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
-        let urlstr = get_str_prop(target_el, "href").expect("No href");
-        let ahost = get_str_prop(target_el, "host").expect("No anchor host");
-        let req = if ahost == location.host().expect("No location host") {
-            let url = url::Url::parse(&urlstr)
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-                .expect("Url parse failed");
-            UrlRequest::Internal(url)
-        } else {
-            UrlRequest::External(urlstr)
-        };
-        handler(req)
-    };
-    event_handler(root, "click", cb)
-}
-
 struct App<M: Model> {
     window: Window,
     target: HtmlDivElement,
     model: Option<M>,
-    update: UpdateFn<M, M::Msg>,
-    view: ViewFn<M>,
+    update: Box<Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
+    view: Box<Fn(&M) -> Html<M>>,
     on_url_request: OnUrlRequestFn<M::Msg>,
     on_url_change: OnUrlChangeFn<M::Msg>,
     current_vdom: Html<M>,
@@ -99,19 +66,15 @@ impl<M: Model + Debug> Debug for App<M> {
 }
 
 impl<M: Model> App<M> {
-    fn loop_update(&mut self, Cmd(mut cmd): Cmd<M::Msg>) -> JsResult<bool> {
-        if let CmdInner::None = cmd {
-            // null op
-            log!("Update: nil op");
-            // returns that it did not rerender
-            return Ok(false);
-        }
+    fn loop_update(&mut self, Cmd(mut cmd): Cmd<M::Msg>) -> JsResult<()> {
         let mut loopct = 0;
         loop {
             loopct += 1;
             log!("Loop update (ct: {})", loopct);
             match cmd {
                 CmdInner::None => break,
+                // return without rendering
+                CmdInner::NoOp => return Ok(()),
                 CmdInner::Msg(msg) => {
                     let model = self.model.take().unwrap();
                     let (new_model, Cmd(new_cmd)) = (self.update)(msg, model);
@@ -128,8 +91,8 @@ impl<M: Model> App<M> {
                 CmdInner::LoadUrl(urlstr) => {
                     let loc = self.window.location();
                     loc.set_href(&urlstr).expect("Failed to set location");
-                    // This should ALWAYS force a reload
-                    return Ok(false);
+                    // This should ALWAYS force a reload so return without rendering
+                    return Ok(());
                 }
                 CmdInner::PushUrl(urlstr) => {
                     // push the state...
@@ -147,7 +110,7 @@ impl<M: Model> App<M> {
         log!("update vdom");
         self.current_vdom = self.render_dom()?;
         // returns that it did rerender
-        Ok(true)
+        Ok(())
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
@@ -189,11 +152,43 @@ pub enum UrlRequest {
     External(String),
 }
 
-/// Run the framework
-pub fn run<M: Model>(
+/// Default Url request handler. Always forces a reload.
+pub fn on_url_request_default<Msg>(req: UrlRequest) -> Cmd<Msg> {
+    match req {
+        UrlRequest::Internal(url) => Cmd::load_url(url.to_string()),
+        UrlRequest::External(urlstr) => Cmd::load_url(urlstr),
+    }
+}
+
+/// Run a sandboxed application, ignoring HTTP and routing
+pub fn sandbox<M: Model>(
+    init: M,
+    view: impl Fn(&M) -> Html<M> + 'static,
+    update: impl Fn(M::Msg, M) -> M + 'static,
+    target: &str,
+) -> JsResult<()> {
+    application(
+        |_| (init, Cmd::none()),
+        view,
+        move |msg, model| (update(msg, model), Cmd::none()),
+        // on url change, just force a load
+        on_url_request_default,
+        // no way to create Cmd::push_url so no way to
+        // trigger the url_changed handler
+        |_| unreachable!(),
+        target,
+    )
+}
+
+// TODO rm
+type OnUrlRequestFn<Msg> = fn(UrlRequest) -> Cmd<Msg>;
+type OnUrlChangeFn<Msg> = fn(url::Url) -> Cmd<Msg>;
+
+/// Run a single-page application, including routing and HTTP requests
+pub fn application<M: Model>(
     init: impl FnOnce(url::Url) -> (M, Cmd<M::Msg>),
-    update: UpdateFn<M, M::Msg>,
-    view: ViewFn<M>,
+    view: impl Fn(&M) -> Html<M> + 'static,
+    update: impl Fn(M::Msg, M) -> (M, Cmd<M::Msg>) + 'static,
     on_url_request: OnUrlRequestFn<M::Msg>,
     on_url_change: OnUrlChangeFn<M::Msg>,
     target: &str,
@@ -218,8 +213,8 @@ pub fn run<M: Model>(
         window,
         target,
         model: Some(model),
-        update,
-        view,
+        update: Box::new(update),
+        view: Box::new(view),
         on_url_request,
         on_url_change,
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
@@ -244,16 +239,43 @@ pub fn run<M: Model>(
     // Then it's safe, hopefully.
     App::<M>::with(|app| {
         // Run initial command, then rerender just to be sure
-        if app.loop_update(initcmd)? {
-            app.render_dom()?;
-        }
-        Result::<(), JsValue>::Ok(())
+        app.loop_update(initcmd)
     })?;
 
     let link_listener = intercept_links::<M>(location, downcast_cpy, on_url_request)?;
     Box::leak(Box::new(link_listener));
 
     Ok(())
+}
+
+fn intercept_links<M: Model>(
+    location: Location,
+    root: DomElement,
+    handler: fn(UrlRequest) -> Cmd<M::Msg>,
+) -> JsResult<Listener<M>> {
+    log!("Intercepting links");
+    let cb = move |event: DomEvent| -> Cmd<M::Msg> {
+        let target: web_sys::EventTarget = event.target().expect("Missing target");
+        let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
+        if target_el.tag_name() != "A" {
+            // short circuit
+            return Cmd(CmdInner::NoOp);
+        }
+        event.prevent_default();
+        let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
+        let urlstr = get_str_prop(target_el, "href").expect("No href");
+        let ahost = get_str_prop(target_el, "host").expect("No anchor host");
+        let req = if ahost == location.host().expect("No location host") {
+            let url = url::Url::parse(&urlstr)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+                .expect("Url parse failed");
+            UrlRequest::Internal(url)
+        } else {
+            UrlRequest::External(urlstr)
+        };
+        handler(req)
+    };
+    event_handler(root, "click", cb)
 }
 
 /// A tree describing which nodes have changed and how
@@ -436,6 +458,8 @@ pub struct Cmd<Msg>(CmdInner<Msg>);
 
 enum CmdInner<Msg> {
     None,
+    /// Indicates that no work should be done (no diffing or rendering)
+    NoOp,
     Msg(Msg),
     Fetch(Box<Future<Item = Msg, Error = JsValue>>),
     LoadUrl(Str),
