@@ -74,7 +74,6 @@ impl<M: Model> App<M> {
         let mut loopct = 0;
         loop {
             loopct += 1;
-            log!("Loop update (ct: {})", loopct);
             match cmd {
                 CmdInner::None => break,
                 // return without rendering
@@ -118,7 +117,6 @@ impl<M: Model> App<M> {
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
-        log!("render dom");
         let new_vdom = (self.view)(self.model.as_ref().unwrap());
         let diff = diff_vdom(&self.current_vdom, &new_vdom);
         if let Diff::Unchanged = diff {
@@ -329,7 +327,6 @@ fn render_diff<'a, M: Model>(
     let child_els = this_el.child_nodes();
     let mut rmct = 0;
     for &(ix, ref diff) in child_diffs.iter() {
-        log!("{}: {:?}", ix, diff);
         let ix = ix - rmct; // adjust index for previously-removed nodes
         match diff {
             Diff::Unchanged => (),

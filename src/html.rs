@@ -144,7 +144,6 @@ pub(crate) enum AttributeInner {
     Placeholder(Str),
     Class(Vec<Str>),
     Id(Str),
-    Null,
     Selected,
     Style(Style),
 }
@@ -234,10 +233,6 @@ pub fn selected() -> Attribute {
     Attribute(AttributeInner::Selected)
 }
 
-pub fn null_attr() -> Attribute {
-    Attribute(AttributeInner::Null)
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Style;
 
@@ -277,6 +272,14 @@ impl<M: Model> ElemMod<M> for Attribute {
     }
 }
 
+impl<M: Model> ElemMod<M> for Option<Attribute> {
+    fn modify_element(self, elem: &mut Element<M>) {
+        if let Some(attr) = self {
+            elem.attrs.push(attr)
+        }
+    }
+}
+
 impl<M: Model> ElemMod<M> for Event<M> {
     fn modify_element(self, elem: &mut Element<M>) {
         elem.events.push(self)
@@ -286,5 +289,13 @@ impl<M: Model> ElemMod<M> for Event<M> {
 impl<M: Model> ElemMod<M> for Html<M> {
     fn modify_element(self, elem: &mut Element<M>) {
         elem.children.push(self)
+    }
+}
+
+impl<M: Model> ElemMod<M> for Option<Html<M>> {
+    fn modify_element(self, elem: &mut Element<M>) {
+        if let Some(inner) = self {
+            elem.children.push(inner)
+        }
     }
 }
