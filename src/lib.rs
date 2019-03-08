@@ -575,6 +575,8 @@ fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
         Href(val) => element.set_attribute("href", val)?,
         Id(val) => element.set_attribute("id", val)?,
         Placeholder(val) => element.set_attribute("placeholder", val)?,
+        Selected => element.set_attribute("selected", "selected")?,
+        Null => (),
         Style(style) => (),
         Value(val) => element.set_attribute("value", val)?,
     };

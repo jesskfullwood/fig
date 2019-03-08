@@ -144,6 +144,8 @@ pub(crate) enum AttributeInner {
     Placeholder(Str),
     Class(Vec<Str>),
     Id(Str),
+    Null,
+    Selected,
     Style(Style),
 }
 
@@ -228,6 +230,14 @@ pub fn class(classes: Vec<Str>) -> Attribute {
     Attribute(AttributeInner::Class(classes))
 }
 
+pub fn selected() -> Attribute {
+    Attribute(AttributeInner::Selected)
+}
+
+pub fn null_attr() -> Attribute {
+    Attribute(AttributeInner::Null)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Style;
 
@@ -244,6 +254,12 @@ impl<M: Model> ElemMod<M> for &'static str {
 impl<M: Model> ElemMod<M> for String {
     fn modify_element(self, elem: &mut Element<M>) {
         elem.children.push(Html::from(Str::from(self)))
+    }
+}
+
+impl<M: Model> ElemMod<M> for Str {
+    fn modify_element(self, elem: &mut Element<M>) {
+        elem.children.push(Html::from(self))
     }
 }
 

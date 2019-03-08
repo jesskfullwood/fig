@@ -1,27 +1,35 @@
-use crate::{UrlRequest, JsValue, JsResult, Cmd};
-
+use crate::{Cmd, JsResult, JsValue, UrlRequest};
 
 pub fn get_session<T: serde::de::DeserializeOwned>() -> JsResult<T> {
-    let window = web_sys::window()
-        .ok_or_else(|| JsValue::from_str("No window"))?;
-    let storage = window.session_storage()
-                  .map(|sessopt| sessopt.ok_or_else(|| JsValue::from_str("No storage")))
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
+    let storage = window
+        .session_storage()
+        .map(|sessopt| sessopt.ok_or_else(|| JsValue::from_str("No storage")))
         .and_then(|inner| inner)?;
-    let itemstr = storage.get_item("session")
-        .map(|itemopt| itemopt
-             .ok_or_else(|| JsValue::from_str("session not found")))
+    let itemstr = storage
+        .get_item("session")
+        .map(|itemopt| itemopt.ok_or_else(|| JsValue::from_str("session not found")))
         .and_then(|inner| inner)?;
     serde_json::from_str(&itemstr).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 pub fn put_session<T: serde::Serialize>(item: T) -> JsResult<()> {
     let itemstr = serde_json::to_string(&item).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let window = web_sys::window()
-        .ok_or_else(|| JsValue::from_str("No window"))?;
-    let storage = window.session_storage()
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
+    let storage = window
+        .session_storage()
         .map(|sessopt| sessopt.ok_or_else(|| JsValue::from_str("No storage")))
         .and_then(|inner| inner)?;
     storage.set_item("session", &itemstr)
+}
+
+pub fn clear_session() -> JsResult<()> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
+    let storage = window
+        .session_storage()
+        .map(|sessopt| sessopt.ok_or_else(|| JsValue::from_str("No storage")))
+        .and_then(|inner| inner)?;
+    storage.remove_item("session")
 }
 
 /// Url request handler. Always forces a reload.
