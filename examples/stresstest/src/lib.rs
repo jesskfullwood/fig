@@ -64,7 +64,7 @@ pub fn render() {
         },
         view,
         update,
-        tree::program::on_url_request_force_load,
+        tree::util::on_url_request_force_load,
         |_| unimplemented!(),
         "app",
     )

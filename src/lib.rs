@@ -21,9 +21,10 @@ use html::{Attribute, Event, EventInner, Tag};
 pub mod fetch;
 pub mod html;
 pub mod program;
+pub mod util;
 
 pub use program::{application, sandbox};
-pub use url;
+pub use url::Url;
 
 pub use wasm_bindgen::JsValue;
 
@@ -149,7 +150,7 @@ impl<M: Model> App<M> {
     }
 }
 
-pub struct Key();
+pub struct Key(());
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UrlRequest {

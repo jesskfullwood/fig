@@ -39,7 +39,7 @@ enum Route {
     Summary,
 }
 
-fn on_url_change(url: url::Url) -> Cmd<Msg> {
+fn on_url_change(url: Url) -> Cmd<Msg> {
     log!("Url change");
     let route = match url.path() {
         "/" => Route::Home,
@@ -205,7 +205,7 @@ pub fn render() {
         |_key, url| (Model::default(), on_url_change(url)),
         view,
         update,
-        tree::program::on_url_request_intercept,
+        tree::util::on_url_request_intercept,
         on_url_change,
         "app",
     )
