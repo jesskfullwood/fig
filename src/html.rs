@@ -1,6 +1,6 @@
 use crate::{Element, Html, Model, Str};
-use derive_more::Display;
-use std::collections::hash_map::DefaultHasher;
+use derive_more::{Constructor, Display};
+use std::collections::{hash_map::DefaultHasher, BTreeMap};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -156,6 +156,63 @@ pub(crate) enum AttributeInner {
     Style(Style),
 }
 
+impl Attribute {
+    pub fn style(style: Style) -> Attribute {
+        Attribute(AttributeInner::Style(style))
+    }
+}
+
+macro_rules! attr_key_value {
+    ($func_name: ident, $tag: ident) => {
+        pub fn $func_name(val: impl Into<Str>) -> Attribute {
+            Attribute(AttributeInner::$tag(val.into()))
+        }
+    };
+}
+
+attr_key_value!(id, Id);
+attr_key_value!(value, Value);
+attr_key_value!(placeholder, Placeholder);
+attr_key_value!(href, Href);
+
+#[macro_export]
+macro_rules! class {
+    ($($item:expr),* $(,)?) => {
+        $crate::html::class(vec![$(<::std::borrow::Cow<'static, str>>::from($item),)*])
+    }
+}
+
+pub fn class(classes: Vec<Str>) -> Attribute {
+    Attribute(AttributeInner::Class(classes))
+}
+
+pub fn selected() -> Attribute {
+    Attribute(AttributeInner::Selected)
+}
+
+#[derive(Debug, Clone, PartialEq, Constructor)]
+pub struct Style(BTreeMap<String, String>);
+
+impl std::fmt::Display for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        for (k, v) in self.0.iter() {
+            write!(f, "{}:{};", k, v)?
+        }
+        Ok(())
+    }
+}
+
+#[macro_export]
+macro_rules! style {
+    ($($key:expr =>  $val:expr),* $(,)?) => {
+        {
+            let mut sty = ::std::collections::BTreeMap::new();
+            $(sty.insert($key.into(), $val.into());)*;
+            Attribute::style(Style::new(sty))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Display)]
 struct ClosureId(u64);
 
@@ -212,37 +269,6 @@ pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) 
         inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
     }
 }
-
-macro_rules! attr_key_value {
-    ($func_name: ident, $tag: ident) => {
-        pub fn $func_name(val: impl Into<Str>) -> Attribute {
-            Attribute(AttributeInner::$tag(val.into()))
-        }
-    };
-}
-
-attr_key_value!(id, Id);
-attr_key_value!(value, Value);
-attr_key_value!(placeholder, Placeholder);
-attr_key_value!(href, Href);
-
-#[macro_export]
-macro_rules! class {
-    ($($item:expr),* $(,)?) => {
-        $crate::html::class(vec![$(<::std::borrow::Cow<'static, str>>::from($item),)*])
-    }
-}
-
-pub fn class(classes: Vec<Str>) -> Attribute {
-    Attribute(AttributeInner::Class(classes))
-}
-
-pub fn selected() -> Attribute {
-    Attribute(AttributeInner::Selected)
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Style;
 
 pub trait ElemMod<M: Model> {
     fn modify_element(self, elem: &mut Element<M>);

@@ -283,7 +283,7 @@ fn diff_vdom<'a, M: Model>(old: &Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
     {
         let diff = diff_vdom(cold, cnew);
         if !diff.is_unchanged() {
-            child_diffs.push((ix as u32, diff_vdom(cold, cnew)))
+            child_diffs.push((ix as u32, diff))
         }
     }
 
@@ -565,20 +565,6 @@ fn attach_event_listener<M: Model>(
     }
 }
 
-fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
-    use html::AttributeInner::*;
-    match &attr.0 {
-        Class(classes) => element.set_attribute("class", &classes.join(" "))?,
-        Href(val) => element.set_attribute("href", val)?,
-        Id(val) => element.set_attribute("id", val)?,
-        Placeholder(val) => element.set_attribute("placeholder", val)?,
-        Selected => element.set_attribute("selected", "selected")?,
-        Style(style) => (),
-        Value(val) => element.set_attribute("value", val)?,
-    };
-    Ok(())
-}
-
 impl<M: Model> Element<M> {
     fn apply_attrs(&self, element: &DomElement) -> JsResult<()> {
         for attr in &self.attrs {
@@ -600,6 +586,20 @@ impl<M: Model> Element<M> {
         }
         Ok(element)
     }
+}
+
+fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
+    use html::AttributeInner::*;
+    match &attr.0 {
+        Class(classes) => element.set_attribute("class", &classes.join(" "))?,
+        Href(val) => element.set_attribute("href", val)?,
+        Id(val) => element.set_attribute("id", val)?,
+        Placeholder(val) => element.set_attribute("placeholder", val)?,
+        Selected => element.set_attribute("selected", "selected")?,
+        Style(style) => element.set_attribute("style", &style.to_string())?,
+        Value(val) => element.set_attribute("value", val)?,
+    };
+    Ok(())
 }
 
 fn replace_events<M: Model>(element: &DomElement, events: &[Event<M>]) -> JsResult<DomElement> {
