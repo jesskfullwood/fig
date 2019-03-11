@@ -7,16 +7,15 @@ use derive_more::{Constructor, From};
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, HtmlElement, Location,
+    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location,
     Node, Text, Window,
 };
 
 use std::borrow::{BorrowMut, Cow};
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug};
-use std::rc::Rc;
 
-use event::{Event, EventInner};
+use event::{Event, Listener};
 use html::{Attribute, Tag};
 
 pub mod event;
@@ -38,11 +37,6 @@ pub trait Model: 'static + Debug {
 }
 
 type Str = Cow<'static, str>;
-
-fn get_str_prop(elem: &DomElement, key: &str) -> JsResult<String> {
-    let key = JsValue::from_str(key);
-    js_sys::Reflect::get(elem, &key).and_then(|val| val.as_string().ok_or(val))
-}
 
 struct App<M: Model> {
     window: Window,
@@ -173,8 +167,8 @@ fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
         }
         event.prevent_default();
         let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
-        let urlstr = get_str_prop(target_el, "href").expect("No href");
-        let ahost = get_str_prop(target_el, "host").expect("No anchor host");
+        let urlstr = util::get_str_prop(target_el, "href").expect("No href");
+        let ahost = util::get_str_prop(target_el, "host").expect("No anchor host");
         let req = if ahost == location.host().expect("No location host") {
             let url = url::Url::parse(&urlstr)
                 .map_err(|e| JsValue::from_str(&e.to_string()))
@@ -185,7 +179,7 @@ fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
         };
         handler(req)
     };
-    event_handler(root, "click", cb)
+    event::event_handler(root, "click", cb)
 }
 
 #[derive(Clone, Debug)]
@@ -488,111 +482,6 @@ impl<M: Model> std::fmt::Display for Element<M> {
     }
 }
 
-/// Represents a listener attached to the DOM.
-/// When it is dropped it will detach the corresponding listener.
-struct Listener<M: Model> {
-    element: DomElement,
-    type_: Str,
-    closure: Closure<FnMut(DomEvent)>,
-    marker: std::marker::PhantomData<M>,
-}
-
-impl<M: Model> Drop for Listener<M> {
-    fn drop(&mut self) {
-        log!("Detaching listener for {}", self.type_);
-        self.element
-            .remove_event_listener_with_callback(&self.type_, self.closure.as_ref().unchecked_ref())
-            .expect("failed to remove");
-    }
-}
-
-impl<M: Model> Debug for Listener<M> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Listener")
-    }
-}
-
-impl<M: Model> Listener<M> {
-    fn new(element: DomElement, type_: Str, closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
-        Listener {
-            element,
-            type_,
-            closure,
-            marker: std::marker::PhantomData,
-        }
-    }
-}
-
-fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(mut handler: F) -> Closure<FnMut()> {
-    Closure::wrap(Box::new(move || {
-        web_sys::console::time();
-        let cmd = handler();
-        App::<M>::with(move |app| {
-            app.loop_update(cmd).expect("Update error");
-        });
-        web_sys::console::time_end();
-    }) as Box<FnMut()>)
-}
-
-fn closure1<M: Model, T, F: FnMut(T) -> Cmd<M::Msg> + 'static>(mut handler: F) -> Closure<FnMut(T)>
-where
-    T: wasm_bindgen::convert::FromWasmAbi + 'static,
-{
-    Closure::wrap(Box::new(move |val: T| {
-        web_sys::console::time();
-        let cmd = handler(val);
-        App::<M>::with(move |app| {
-            app.loop_update(cmd).expect("Update error");
-        });
-        web_sys::console::time_end();
-    }) as Box<FnMut(T)>)
-}
-
-fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
-    element: DomElement,
-    event_name: S,
-    handler: F,
-) -> JsResult<Listener<M>> {
-    let event_name = event_name.into();
-    log!("New event hander closure");
-    let cb = closure1::<M, _, _>(handler);
-    let jsfunction = cb.as_ref().unchecked_ref();
-    element.add_event_listener_with_callback(&event_name, jsfunction)?;
-    Ok(Listener::new(element, event_name, cb))
-}
-
-fn input_handler<M: Model>(
-    element: &DomElement,
-    handler: Rc<dyn Fn(String) -> M::Msg>,
-) -> JsResult<Listener<M>> {
-    let inner = move |event: DomEvent| {
-        let target: web_sys::EventTarget = event.target().expect("Missing target");
-        let target_el: &HtmlElement = target.dyn_ref().expect("Not an Html Element");
-        Cmd::msg(handler(
-            get_str_prop(target_el, "value").expect("missing value"),
-        ))
-    };
-    event_handler::<M, _, _>(element.clone(), "input", inner)
-}
-
-fn click_handler<M: Model>(
-    element: &DomElement,
-    handler: Rc<dyn Fn() -> M::Msg>,
-) -> JsResult<Listener<M>> {
-    let inner = move |_event: DomEvent| Cmd::msg(handler());
-    event_handler::<M, _, _>(element.clone(), "click", inner)
-}
-
-fn attach_event_listener<M: Model>(
-    event: &Event<M>,
-    element: &DomElement,
-) -> JsResult<Listener<M>> {
-    match &event.inner {
-        EventInner::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
-        EventInner::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
-    }
-}
-
 impl<M: Model> Element<M> {
     fn apply_attrs(&self, element: &DomElement) -> JsResult<()> {
         for attr in &self.attrs {
@@ -605,7 +494,7 @@ impl<M: Model> Element<M> {
         let element = document.create_element(&self.tag.to_string())?;
         self.apply_attrs(&element)?;
         for event in &self.events {
-            let listener = attach_event_listener(event, &element)?;
+            let listener = event::attach_event_listener(event, &element)?;
             Box::leak(Box::new(listener));
         }
         for child in &self.children {
@@ -686,7 +575,7 @@ impl<M: Model> Timer<M> {
         // XXX Technically this is not typesafe - the user
         // could 'lie' about the type of M and we cannot enforce it
         let handle = subscription_handle(key, f);
-        let cb = closure0::<M, _>(handle);
+        let cb = event::closure0::<M, _>(handle);
         let jsfunction = cb.as_ref().unchecked_ref();
         let window = web_sys::window().expect("No global `window` exists");
         window

@@ -1,7 +1,6 @@
 use crate::{Element, Html, Model, Str};
 use derive_more::Constructor;
 use std::collections::BTreeMap;
-use std::hash::Hasher;
 
 use crate::event::Event;
 

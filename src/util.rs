@@ -1,4 +1,4 @@
-use crate::{Cmd, JsResult, JsValue, UrlRequest};
+use crate::{Cmd, DomElement, JsResult, JsValue, UrlRequest};
 
 pub fn get_session<T: serde::de::DeserializeOwned>() -> JsResult<T> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
@@ -47,4 +47,10 @@ pub fn on_url_request_intercept<Msg>(req: UrlRequest) -> Cmd<Msg> {
         Internal(url) => Cmd::push_url(url.to_string()),
         External(urlstr) => Cmd::load_url(urlstr),
     }
+}
+
+/// Get property of dom element
+pub fn get_str_prop(elem: &DomElement, key: &str) -> JsResult<String> {
+    let key = JsValue::from_str(key);
+    js_sys::Reflect::get(elem, &key).and_then(|val| val.as_string().ok_or(val))
 }
