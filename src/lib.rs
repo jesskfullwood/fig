@@ -146,10 +146,9 @@ impl<M: Model> App<M> {
     }
 
     fn stash_event_listener(&mut self, id: ClosureId, listener: Listener<M>) {
-        assert!(
-            self.listeners.insert(id, listener).is_none(),
-            "duplcate ClosureId!"
-        )
+        // TODO A closure of the same ID could already exists, until we properly
+        // detach and dispose of all listeners
+        self.listeners.insert(id, listener);
     }
 
     fn remove_event_listener(&mut self, id: ClosureId) -> Option<Listener<M>> {
@@ -372,6 +371,7 @@ fn render_diff<'a, M: Model>(
             Diff::Replace(node) => {
                 let old_el = child_els.get(ix).expect("bad replace node index");
                 let new_el = node.render_to_html(doc)?;
+                // TODO we need to remove all the existing listeners else they will leak
                 this_el.replace_child(&new_el, &old_el)?;
             }
             Diff::Remove => {
@@ -508,7 +508,7 @@ impl<M: Model> Element<M> {
         self.add_attrs(&element)?;
         for event in &self.events {
             let listener = event::attach_event_listener(event, &element)?;
-            Box::leak(Box::new(listener));
+            App::<M>::with(|app| app.stash_event_listener(event.id(), listener));
         }
         for child in &self.children {
             let child_elem = child.render_to_html(document)?;
