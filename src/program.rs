@@ -1,9 +1,11 @@
 use crate::{
     intercept_links, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Tag, UrlRequest, APP,
 };
-use wasm_bindgen::JsCast;
 
+use wasm_bindgen::JsCast;
 use web_sys::{Element as DomElement, HtmlDivElement};
+
+use std::collections::HashMap;
 
 /// Run a sandboxed application, ignoring HTTP and routing
 pub fn sandbox<M: Model>(
@@ -56,18 +58,19 @@ pub fn application<M: Model>(
         view: Box::new(view),
         on_url_change: Box::new(on_url_change),
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
+        listeners: HashMap::new(),
     };
 
     // put app on the heap...
     let app = Box::new(app);
     // and leak it so we can put it in a thread-local
-    let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut ();
+    let app_ptr = Box::leak::<'static>(app) as *mut App<M> as *mut u8;
     // super unsafe. We swap our global void pointer to point to our app.
     // We to do it this way because it isn't possible to have
     // generics in globals. That is, the user of the library chooses their own Model
     // so we can't know the full type of App in advance.
     APP.with(move |ptr| {
-        let inner = ptr as *const *mut () as *mut *mut ();
+        let inner = ptr as *const *mut u8 as *mut *mut u8;
         unsafe {
             *inner = app_ptr;
         }

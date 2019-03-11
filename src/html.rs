@@ -144,25 +144,58 @@ macro_rules! log {
 // TODO move constructor funcs to own module
 pub struct Attribute(pub(crate) AttributeInner);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum AttributeInner {
-    Class(Vec<Str>),
-    Disabled,
-    Href(Str),
-    Id(Str),
-    Placeholder(Str),
-    Selected,
-    Style(Style),
-    Value(Str),
+macro_rules! attr_def {
+    ($($enum:ident => $inner:ty => $name:ident),* $(,)?) => {
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+        pub(crate) enum AttributeInner {
+            $($enum($inner)),*
+        }
+
+        impl AttributeInner {
+            fn key(&self) -> &str {
+                use AttributeInner::*;
+                match self {
+                    $($enum(_) => stringify!($name),)*
+                }
+            }
+        }
+    }
+}
+
+attr_def! {
+    Class => Vec<Str> => class,
+    Disabled => () => disabled,
+    Href => Str => href,
+    Id => Str => id,
+    Placeholder => Str => placeholder,
+    Selected => () => selected,
+    Style => Style => style,
+    Value => Str => value
 }
 
 impl Attribute {
+    pub(crate) fn key(&self) -> &str {
+        self.0.key()
+    }
+
+    pub(crate) fn value(&self) -> Str {
+        use AttributeInner::*;
+        match &self.0 {
+            Class(classes) => classes.join(" ").into(),
+            Disabled(()) => "disabled".into(),
+            Selected(()) => "selected".into(),
+            Href(val) | Id(val) | Placeholder(val) | Value(val) => val.clone(),
+            Style(style) => style.to_string().into(),
+        }
+    }
+
+    #[doc(hidden)] // Prefer the `style!` macro
     pub fn style(style: Style) -> Attribute {
         Attribute(AttributeInner::Style(style))
     }
 }
 
-macro_rules! attr_key_value {
+macro_rules! attr_key_value_func {
     ($func_name: ident, $tag: ident) => {
         pub fn $func_name(val: impl Into<Str>) -> Attribute {
             Attribute(AttributeInner::$tag(val.into()))
@@ -170,10 +203,10 @@ macro_rules! attr_key_value {
     };
 }
 
-attr_key_value!(id, Id);
-attr_key_value!(value, Value);
-attr_key_value!(placeholder, Placeholder);
-attr_key_value!(href, Href);
+attr_key_value_func!(id, Id);
+attr_key_value_func!(value, Value);
+attr_key_value_func!(placeholder, Placeholder);
+attr_key_value_func!(href, Href);
 
 #[macro_export]
 macro_rules! class {
@@ -187,11 +220,11 @@ pub fn class(classes: Vec<Str>) -> Attribute {
 }
 
 pub fn selected() -> Attribute {
-    Attribute(AttributeInner::Selected)
+    Attribute(AttributeInner::Selected(()))
 }
 
 pub fn disabled() -> Attribute {
-    Attribute(AttributeInner::Disabled)
+    Attribute(AttributeInner::Disabled(()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Constructor)]

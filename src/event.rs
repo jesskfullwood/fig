@@ -7,11 +7,11 @@ use derive_more::Display;
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{Element as DomElement, Event as DomEvent, HtmlElement};
 
-use crate::{log, App, Cmd, JsResult, Model, Str};
 use crate::util;
+use crate::{log, App, Cmd, JsResult, Model, Str};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Display)]
-struct ClosureId(u64);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+pub(crate) struct ClosureId(u64);
 
 pub struct Event<M: Model> {
     id: ClosureId,
@@ -52,6 +52,32 @@ impl<M: Model> Ord for Event<M> {
     }
 }
 
+impl<M: Model> Event<M> {
+    pub(crate) fn id(&self) -> ClosureId {
+        self.id
+    }
+
+    fn click<S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
+        // Can't hash fn ptr - compiler bug! Do very unsafe workaround
+        // https://github.com/rust-lang/rust/issues/46989
+        let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
+        let hash = hash_closure(&s, ptr);
+        Event {
+            id: ClosureId(hash),
+            inner: EventInner::OnClick(Rc::new(move || f(&s))),
+        }
+    }
+
+    pub fn input<S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
+        let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
+        let hash = hash_closure(&s, ptr);
+        Event {
+            id: ClosureId(hash),
+            inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
+        }
+    }
+}
+
 fn hash_closure<S: Hash, F: Hash>(s: S, f: F) -> u64 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
@@ -60,25 +86,11 @@ fn hash_closure<S: Hash, F: Hash>(s: S, f: F) -> u64 {
 }
 
 pub fn on_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
-    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
-    // https://github.com/rust-lang/rust/issues/46989
-    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-    let hash = hash_closure(&s, ptr);
-    Event {
-        id: ClosureId(hash),
-        inner: EventInner::OnClick(Rc::new(move || f(&s))),
-    }
+    Event::click(s, f)
 }
 
 pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
-    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
-    // https://github.com/rust-lang/rust/issues/46989
-    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-    let hash = hash_closure(&s, ptr);
-    Event {
-        id: ClosureId(hash),
-        inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
-    }
+    Event::input(s, f)
 }
 
 /// Represents a listener attached to the DOM.

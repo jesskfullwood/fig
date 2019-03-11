@@ -76,7 +76,7 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     log!("update model with message: {:?}", msg);
     match msg {
         Msg::Select(select) => (Model { select, ..model }, Cmd::none()),
-        Msg::FetchSelected(val) => (model, Cmd::fetch(fetch_selected(val))),
+        Msg::FetchSelected(val) => (model, Cmd::spawn(fetch_selected(val))),
         Msg::FetchedSelected(val) => (
             Model {
                 server_says: Some(val),

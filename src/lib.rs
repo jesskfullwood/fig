@@ -7,15 +7,15 @@ use derive_more::{Constructor, From};
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location,
-    Node, Text, Window,
+    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location, Node, Text,
+    Window,
 };
 
 use std::borrow::{BorrowMut, Cow};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 
-use event::{Event, Listener};
+use event::{ClosureId, Event, Listener};
 use html::{Attribute, Tag};
 
 pub mod event;
@@ -24,6 +24,7 @@ pub mod html;
 pub mod program;
 pub mod util;
 
+pub use event::{on_click, on_input};
 pub use program::{application, sandbox};
 pub use url::Url;
 
@@ -47,10 +48,11 @@ struct App<M: Model> {
     // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
     on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
+    listeners: HashMap<ClosureId, Listener<M>>,
 }
 
 thread_local! {
-    static APP: *mut () = std::ptr::null_mut();
+    static APP: *mut u8 = std::ptr::null_mut();
 }
 
 impl<M: Model> Drop for App<M> {
@@ -127,7 +129,7 @@ impl<M: Model> App<M> {
 
     fn with<R>(f: impl FnOnce(&mut Self) -> R) -> R {
         APP.with(|mut ptr| {
-            let ptr: *mut () = **ptr.borrow_mut();
+            let ptr: *mut u8 = **ptr.borrow_mut();
             let ptr: *mut App<M> = ptr as *mut App<M>;
             unsafe { f(&mut *ptr) }
         })
@@ -141,6 +143,17 @@ impl<M: Model> App<M> {
     fn location(&self) -> JsResult<url::Url> {
         let urlstr = self.window.location().href()?;
         url::Url::parse(&urlstr).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    fn stash_event_listener(&mut self, id: ClosureId, listener: Listener<M>) {
+        assert!(
+            self.listeners.insert(id, listener).is_none(),
+            "duplcate ClosureId!"
+        )
+    }
+
+    fn remove_event_listener(&mut self, id: ClosureId) -> Option<Listener<M>> {
+        self.listeners.remove(&id)
     }
 }
 
@@ -371,10 +384,10 @@ fn render_diff<'a, M: Model>(
                 events,
                 children,
             } => {
-                let mut child_el: Node = child_els.get(ix).expect("bad node index");
+                let child_el: Node = child_els.get(ix).expect("bad node index");
                 if !events.is_empty() {
                     let el: &DomElement = child_el.dyn_ref().expect("Not an element");
-                    child_el = update_events(&el, &events)?.unchecked_into();
+                    update_events(&el, &events)?;
                 }
                 if !attrs.is_empty() {
                     let el: &DomElement = child_el.dyn_ref().expect("Not an element");
@@ -483,16 +496,16 @@ impl<M: Model> std::fmt::Display for Element<M> {
 }
 
 impl<M: Model> Element<M> {
-    fn apply_attrs(&self, element: &DomElement) -> JsResult<()> {
+    fn add_attrs(&self, element: &DomElement) -> JsResult<()> {
         for attr in &self.attrs {
-            apply_attr_to_elem(attr, element)?
+            add_attr_to_element(attr, element)?
         }
         Ok(())
     }
 
     fn render_to_html(&self, document: &Document) -> JsResult<DomElement> {
         let element = document.create_element(&self.tag.to_string())?;
-        self.apply_attrs(&element)?;
+        self.add_attrs(&element)?;
         for event in &self.events {
             let listener = event::attach_event_listener(event, &element)?;
             Box::leak(Box::new(listener));
@@ -505,51 +518,41 @@ impl<M: Model> Element<M> {
     }
 }
 
-fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
-    use html::AttributeInner::*;
-    match &attr.0 {
-        Class(classes) => element.set_attribute("class", &classes.join(" "))?,
-        Disabled => element.set_attribute("disabled", "disabled")?,
-        Href(val) => element.set_attribute("href", val)?,
-        Id(val) => element.set_attribute("id", val)?,
-        Placeholder(val) => element.set_attribute("placeholder", val)?,
-        Selected => element.set_attribute("selected", "selected")?,
-        Style(style) => element.set_attribute("style", &style.to_string())?,
-        Value(val) => element.set_attribute("value", val)?,
-    };
+fn add_attr_to_element(attr: &Attribute, element: &DomElement) -> JsResult<()> {
+    let key = attr.key();
+    let val = attr.value();
+    element.set_attribute(key, &val)
+}
+
+fn remove_attr_from_element(attr: &Attribute, element: &DomElement) -> JsResult<()> {
+    let key = attr.key();
+    element.remove_attribute(key)
+}
+
+fn update_events<M: Model>(element: &DomElement, events: &[Delta<&Event<M>>]) -> JsResult<()> {
+    log!("Replacing listeners");
+    for delta in events {
+        match delta {
+            Delta::Add(event) => {
+                let listener = event::attach_event_listener(event, &element)?;
+                App::<M>::with(|app| app.stash_event_listener(event.id(), listener));
+            }
+            Delta::Remove(event) => {
+                App::<M>::with(|app| app.remove_event_listener(event.id()));
+            }
+        }
+    }
     Ok(())
 }
 
-fn update_events<M: Model>(
-    element: &DomElement,
-    events: &[Delta<&Event<M>>],
-) -> JsResult<DomElement> {
-    unimplemented!()
-    // log!("Replacing listeners");
-
-    // // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
-    // // Stupid hack IMO
-    // let new_element = element.clone_node_with_deep(true)?;
-    // let new_element: DomElement = new_element.dyn_into()?;
-
-    // element
-    //     .parent_node()
-    //     .unwrap()
-    //     .replace_child(&new_element, &element)?;
-    // for event in events {
-    //     let listener = attach_event_listener(event, &new_element)?;
-    //     // TODO stop leaking the listener!
-    //     Box::leak(Box::new(listener));
-    // }
-    // Ok(new_element)
-}
-
 fn update_attrs(element: &DomElement, attrs: &[Delta<&Attribute>]) -> JsResult<()> {
-    unimplemented!()
-    // for attr in attrs {
-    //     apply_attr_to_elem(attr, element)?
-    // }
-    // Ok(())
+    for delta in attrs {
+        match delta {
+            Delta::Add(attr) => add_attr_to_element(attr, element)?,
+            Delta::Remove(attr) => remove_attr_from_element(attr, element)?,
+        }
+    }
+    Ok(())
 }
 
 pub struct Timer<M: Model> {
