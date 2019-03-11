@@ -1,9 +1,9 @@
 use crate::{Element, Html, Model, Str};
-use derive_more::{Constructor, Display};
-use std::collections::{hash_map::DefaultHasher, BTreeMap};
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::rc::Rc;
+use derive_more::Constructor;
+use std::collections::BTreeMap;
+use std::hash::Hasher;
+
+use crate::event::Event;
 
 macro_rules! make_html_tags {
     ($d:tt, $($typ:ident => $text:ident),* $(,)?) => {
@@ -140,20 +140,21 @@ macro_rules! log {
     ($($t:tt)*) => ($crate::html::log_1(&format_args!($($t)*).to_string().into()))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// Represents an Element attribute.
 // TODO move constructor funcs to own module
 pub struct Attribute(pub(crate) AttributeInner);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum AttributeInner {
-    Value(Str),
-    Href(Str),
-    Placeholder(Str),
     Class(Vec<Str>),
+    Disabled,
+    Href(Str),
     Id(Str),
+    Placeholder(Str),
     Selected,
     Style(Style),
+    Value(Str),
 }
 
 impl Attribute {
@@ -190,7 +191,11 @@ pub fn selected() -> Attribute {
     Attribute(AttributeInner::Selected)
 }
 
-#[derive(Debug, Clone, PartialEq, Constructor)]
+pub fn disabled() -> Attribute {
+    Attribute(AttributeInner::Disabled)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Constructor)]
 pub struct Style(BTreeMap<String, String>);
 
 impl std::fmt::Display for Style {
@@ -210,63 +215,6 @@ macro_rules! style {
             $(sty.insert($key.into(), $val.into());)*;
             Attribute::style(Style::new(sty))
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Display)]
-struct ClosureId(u64);
-
-pub struct Event<M: Model> {
-    id: ClosureId,
-    pub(crate) inner: EventInner<M>,
-}
-
-pub(crate) enum EventInner<M: Model> {
-    OnClick(Rc<Fn() -> M::Msg>),
-    OnInput(Rc<Fn(String) -> M::Msg>),
-}
-
-impl<M: Model> fmt::Debug for Event<M> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.inner {
-            EventInner::OnClick(_) => write!(f, "OnClickEvent({})", self.id),
-            EventInner::OnInput(_) => write!(f, "OnInputEvent({})", self.id),
-        }
-    }
-}
-
-impl<M: Model> PartialEq for Event<M> {
-    fn eq(&self, other: &Event<M>) -> bool {
-        self.id == other.id
-    }
-}
-
-fn hash_closure<S: Hash, F: Hash>(s: S, f: F) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    f.hash(&mut hasher);
-    hasher.finish()
-}
-
-pub fn on_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
-    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
-    // https://github.com/rust-lang/rust/issues/46989
-    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-    let hash = hash_closure(&s, ptr);
-    Event {
-        id: ClosureId(hash),
-        inner: EventInner::OnClick(Rc::new(move || f(&s))),
-    }
-}
-
-pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
-    // Can't hash fn ptr - compiler bug! Do very unsafe workaround
-    // https://github.com/rust-lang/rust/issues/46989
-    let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-    let hash = hash_closure(&s, ptr);
-    Event {
-        id: ClosureId(hash),
-        inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
     }
 }
 
@@ -317,6 +265,14 @@ impl<M: Model> ElemMod<M> for Option<Attribute> {
 impl<M: Model> ElemMod<M> for Event<M> {
     fn modify_element(self, elem: &mut Element<M>) {
         elem.events.push(self)
+    }
+}
+
+impl<M: Model> ElemMod<M> for Option<Event<M>> {
+    fn modify_element(self, elem: &mut Element<M>) {
+        if let Some(event) = self {
+            elem.events.push(event)
+        }
     }
 }
 

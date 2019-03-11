@@ -11,13 +11,15 @@ use web_sys::{
     Node, Text, Window,
 };
 
-use std::borrow::BorrowMut;
-use std::borrow::Cow;
+use std::borrow::{BorrowMut, Cow};
+use std::collections::BTreeSet;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use html::{Attribute, Event, EventInner, Tag};
+use event::{Event, EventInner};
+use html::{Attribute, Tag};
 
+pub mod event;
 pub mod fetch;
 pub mod html;
 pub mod program;
@@ -84,7 +86,7 @@ impl<M: Model> App<M> {
                     self.model.replace(new_model);
                     cmd = new_cmd; // we go again
                 }
-                CmdInner::Fetch(request) => {
+                CmdInner::Spawn(request) => {
                     let fut = request.map(|msg: M::Msg| {
                         App::<M>::with(|app| app.loop_update(Cmd::msg(msg)).expect("update failed"))
                     });
@@ -186,6 +188,12 @@ fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
     event_handler(root, "click", cb)
 }
 
+#[derive(Clone, Debug)]
+pub enum Delta<T> {
+    Add(T),
+    Remove(T),
+}
+
 /// A tree describing which nodes have changed and how
 #[derive(Clone)]
 enum Diff<'a, M: Model> {
@@ -193,8 +201,8 @@ enum Diff<'a, M: Model> {
     Replace(&'a Html<M>),
     Remove,
     Update {
-        attrs: &'a [Attribute],
-        events: &'a [Event<M>],
+        attrs: Vec<Delta<&'a Attribute>>,
+        events: Vec<Delta<&'a Event<M>>>,
         children: Vec<(u32, Diff<'a, M>)>,
     },
     Unchanged,
@@ -244,7 +252,7 @@ impl<'a, M: Model> Diff<'a, M> {
     }
 }
 
-fn diff_vdom<'a, M: Model>(old: &Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
+fn diff_vdom<'a, M: Model>(old: &'a Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
     let (old_el, new_el) = match (old, new) {
         (Html::Text(t1), Html::Text(t2)) => {
             return if t1 == t2 {
@@ -263,14 +271,32 @@ fn diff_vdom<'a, M: Model>(old: &Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
     }
 
     let attrs = if old_el.attrs == new_el.attrs {
-        &[]
+        Vec::new()
     } else {
-        &new_el.attrs[..]
+        let mut deltas = Vec::new();
+        let oldset: BTreeSet<&Attribute> = old_el.attrs.iter().collect();
+        let newset: BTreeSet<&Attribute> = new_el.attrs.iter().collect();
+        for &attr in oldset.difference(&newset) {
+            deltas.push(Delta::Remove(attr))
+        }
+        for &attr in newset.difference(&oldset) {
+            deltas.push(Delta::Add(attr))
+        }
+        deltas
     };
     let events = if old_el.events == new_el.events {
-        &[]
+        Vec::new()
     } else {
-        &new_el.events[..]
+        let mut deltas = Vec::new();
+        let oldset: BTreeSet<&Event<M>> = old_el.events.iter().collect();
+        let newset: BTreeSet<&Event<M>> = new_el.events.iter().collect();
+        for &attr in oldset.difference(&newset) {
+            deltas.push(Delta::Remove(attr))
+        }
+        for &attr in newset.difference(&oldset) {
+            deltas.push(Delta::Add(attr))
+        }
+        deltas
     };
 
     let mut child_diffs = Vec::new();
@@ -354,11 +380,11 @@ fn render_diff<'a, M: Model>(
                 let mut child_el: Node = child_els.get(ix).expect("bad node index");
                 if !events.is_empty() {
                     let el: &DomElement = child_el.dyn_ref().expect("Not an element");
-                    child_el = replace_events(&el, events)?.unchecked_into();
+                    child_el = update_events(&el, &events)?.unchecked_into();
                 }
                 if !attrs.is_empty() {
                     let el: &DomElement = child_el.dyn_ref().expect("Not an element");
-                    reapply_attrs(&el, attrs)?;
+                    update_attrs(&el, &attrs)?;
                 }
                 render_diff(&child_el, &*children, doc)?;
             }
@@ -374,7 +400,7 @@ enum CmdInner<Msg> {
     /// Indicates that no work should be done (no diffing or rendering)
     NoOp,
     Msg(Msg),
-    Fetch(Box<Future<Item = Msg, Error = JsValue>>),
+    Spawn(Box<Future<Item = Msg, Error = JsValue>>),
     LoadUrl(Str),
     PushUrl(Str),
 }
@@ -388,8 +414,8 @@ impl<Msg> Cmd<Msg> {
         Cmd(CmdInner::Msg(msg))
     }
 
-    pub fn fetch(fut: impl Future<Item = Msg, Error = JsValue> + 'static) -> Self {
-        Cmd(CmdInner::Fetch(Box::new(fut)))
+    pub fn spawn(fut: impl Future<Item = Msg, Error = JsValue> + 'static) -> Self {
+        Cmd(CmdInner::Spawn(Box::new(fut)))
     }
 
     pub fn push_url(s: impl Into<Str>) -> Self {
@@ -401,6 +427,8 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
+/// Take a subscription callback and hook it into the main event loop
+// TODO this should.. be done better, somehow
 pub fn subscription_handle<M: Model>(
     _key: Key,
     f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
@@ -592,6 +620,7 @@ fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
     use html::AttributeInner::*;
     match &attr.0 {
         Class(classes) => element.set_attribute("class", &classes.join(" "))?,
+        Disabled => element.set_attribute("disabled", "disabled")?,
         Href(val) => element.set_attribute("href", val)?,
         Id(val) => element.set_attribute("id", val)?,
         Placeholder(val) => element.set_attribute("placeholder", val)?,
@@ -602,31 +631,36 @@ fn apply_attr_to_elem(attr: &Attribute, element: &DomElement) -> JsResult<()> {
     Ok(())
 }
 
-fn replace_events<M: Model>(element: &DomElement, events: &[Event<M>]) -> JsResult<DomElement> {
-    log!("Replacing listeners");
+fn update_events<M: Model>(
+    element: &DomElement,
+    events: &[Delta<&Event<M>>],
+) -> JsResult<DomElement> {
+    unimplemented!()
+    // log!("Replacing listeners");
 
-    // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
-    // Stupid hack IMO
-    let new_element = element.clone_node_with_deep(true)?;
-    let new_element: DomElement = new_element.dyn_into()?;
+    // // https://stackoverflow.com/questions/4386300/javascript-dom-how-to-remove-all-events-of-a-dom-object
+    // // Stupid hack IMO
+    // let new_element = element.clone_node_with_deep(true)?;
+    // let new_element: DomElement = new_element.dyn_into()?;
 
-    element
-        .parent_node()
-        .unwrap()
-        .replace_child(&new_element, &element)?;
-    for event in events {
-        let listener = attach_event_listener(event, &new_element)?;
-        // TODO stop leaking the listener!
-        Box::leak(Box::new(listener));
-    }
-    Ok(new_element)
+    // element
+    //     .parent_node()
+    //     .unwrap()
+    //     .replace_child(&new_element, &element)?;
+    // for event in events {
+    //     let listener = attach_event_listener(event, &new_element)?;
+    //     // TODO stop leaking the listener!
+    //     Box::leak(Box::new(listener));
+    // }
+    // Ok(new_element)
 }
 
-fn reapply_attrs(element: &DomElement, attrs: &[Attribute]) -> JsResult<()> {
-    for attr in attrs {
-        apply_attr_to_elem(attr, element)?
-    }
-    Ok(())
+fn update_attrs(element: &DomElement, attrs: &[Delta<&Attribute>]) -> JsResult<()> {
+    unimplemented!()
+    // for attr in attrs {
+    //     apply_attr_to_elem(attr, element)?
+    // }
+    // Ok(())
 }
 
 pub struct Timer<M: Model> {
