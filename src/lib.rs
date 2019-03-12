@@ -15,7 +15,7 @@ use std::borrow::{BorrowMut, Cow};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 
-use event::{ClosureId, Event, Listener};
+use event::{Event, EventId, Listener};
 use html::{Attribute, Tag};
 
 pub mod event;
@@ -48,7 +48,7 @@ struct App<M: Model> {
     // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
     on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
-    listeners: HashMap<ClosureId, Listener<M>>,
+    listeners: HashMap<EventId, Listener<M>>,
 }
 
 thread_local! {
@@ -145,14 +145,15 @@ impl<M: Model> App<M> {
         url::Url::parse(&urlstr).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    fn stash_event_listener(&mut self, id: ClosureId, listener: Listener<M>) {
+    fn stash_event_listener(&mut self, id: EventId, listener: Listener<M>) {
         // TODO A closure of the same ID could already exists, until we properly
         // detach and dispose of all listeners
         self.listeners.insert(id, listener);
+        log!("Stashed events: {}", self.listeners.len());
     }
 
-    fn remove_event_listener(&mut self, id: ClosureId) -> Option<Listener<M>> {
-        self.listeners.remove(&id)
+    fn remove_event_listener(&mut self, id: &EventId) -> Option<Listener<M>> {
+        self.listeners.remove(id)
     }
 }
 
@@ -204,8 +205,13 @@ pub enum Delta<T> {
 #[derive(Clone)]
 enum Diff<'a, M: Model> {
     Insert(&'a Html<M>),
-    Replace(&'a Html<M>),
-    Remove,
+    Replace {
+        with: &'a Html<M>,
+        events_to_rm: Vec<EventId>,
+    },
+    Remove {
+        events_to_rm: Vec<EventId>,
+    },
     Update {
         attrs: Vec<Delta<&'a Attribute>>,
         events: Vec<Delta<&'a Event<M>>>,
@@ -219,8 +225,8 @@ impl<'a, M: Model> Debug for Diff<'a, M> {
         use Diff::*;
         let txt = match self {
             Insert(_) => "Insert",
-            Replace(_) => "Replace",
-            Remove => "Remove",
+            Replace { .. } => "Replace",
+            Remove { .. } => "Remove",
             Unchanged => "Unchanged",
             Update {
                 attrs,
@@ -264,16 +270,33 @@ fn diff_vdom<'a, M: Model>(old: &'a Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
             return if t1 == t2 {
                 Diff::Unchanged
             } else {
-                Diff::Replace(new)
+                Diff::Replace {
+                    with: new,
+                    events_to_rm: Vec::new(),
+                }
+            }
+        }
+        (Html::Text(_), Html::Element(_)) => {
+            return Diff::Replace {
+                with: new,
+                events_to_rm: Vec::new(),
+            }
+        }
+        (Html::Element(_), Html::Text(_)) => {
+            return Diff::Replace {
+                with: new,
+                events_to_rm: old.get_nested_event_ids(),
             }
         }
         (Html::Element(e1), Html::Element(e2)) => (e1, e2),
-        _ => return Diff::Replace(new),
     };
 
     if old_el.tag != new_el.tag {
         // assume everything can be nuked
-        return Diff::Replace(new);
+        return Diff::Replace {
+            with: new,
+            events_to_rm: old.get_nested_event_ids(),
+        };
     }
 
     let attrs = if old_el.attrs == new_el.attrs {
@@ -329,7 +352,8 @@ fn diff_vdom<'a, M: Model>(old: &'a Html<M>, new: &'a Html<M>) -> Diff<'a, M> {
         }
     } else {
         for ix in nextct..curct {
-            child_diffs.push((ix as u32, Diff::Remove))
+            let events_to_rm = old_el.children[ix].get_nested_event_ids();
+            child_diffs.push((ix as u32, Diff::Remove { events_to_rm }))
         }
     }
 
@@ -368,13 +392,21 @@ fn render_diff<'a, M: Model>(
                 // XXX insert child, not append!
                 this_el.append_child(&new_el)?;
             }
-            Diff::Replace(node) => {
+            Diff::Replace {
+                with: node,
+                events_to_rm,
+            } => {
+                for event_id in events_to_rm {
+                    App::<M>::with(|app| app.remove_event_listener(event_id));
+                }
                 let old_el = child_els.get(ix).expect("bad replace node index");
                 let new_el = node.render_to_html(doc)?;
-                // TODO we need to remove all the existing listeners else they will leak
                 this_el.replace_child(&new_el, &old_el)?;
             }
-            Diff::Remove => {
+            Diff::Remove { events_to_rm } => {
+                for event_id in events_to_rm {
+                    App::<M>::with(|app| app.remove_event_listener(event_id));
+                }
                 let old_el = child_els.get(ix).expect("bad remove node index");
                 this_el.remove_child(&old_el)?;
                 rmct += 1;
@@ -467,6 +499,28 @@ impl<M: Model> Html<M> {
             Html::Element(elem) => elem.render_to_html(doc).map(|t| t.unchecked_into()),
         }
     }
+
+    /// Find all events attached the current node and all child nodes. This is useful
+    /// because we have to clean up the events 'manually' when a node is removed
+    fn get_nested_event_ids(&self) -> Vec<EventId> {
+        let mut events_to_rm = Vec::new();
+        self.recursively_gather_event_ids(&mut events_to_rm);
+        events_to_rm
+    }
+
+    fn recursively_gather_event_ids(&self, ids: &mut Vec<EventId>) {
+        match &self {
+            Html::Text(_) => (),
+            Html::Element(elem) => {
+                for ev in &elem.events {
+                    ids.push(ev.id());
+                }
+                for c in &elem.children {
+                    c.recursively_gather_event_ids(ids)
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Constructor)]
@@ -538,7 +592,8 @@ fn update_events<M: Model>(element: &DomElement, events: &[Delta<&Event<M>>]) ->
                 App::<M>::with(|app| app.stash_event_listener(event.id(), listener));
             }
             Delta::Remove(event) => {
-                App::<M>::with(|app| app.remove_event_listener(event.id()));
+                // When the listener is dropped it is automatically removed from the DOM
+                App::<M>::with(|app| app.remove_event_listener(&event.id()));
             }
         }
     }

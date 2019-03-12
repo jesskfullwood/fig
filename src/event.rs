@@ -11,10 +11,10 @@ use crate::util;
 use crate::{log, App, Cmd, JsResult, Model, Str};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
-pub(crate) struct ClosureId(u64);
+pub(crate) struct EventId(u64);
 
 pub struct Event<M: Model> {
-    id: ClosureId,
+    id: EventId,
     pub(crate) inner: EventInner<M>,
 }
 
@@ -53,7 +53,7 @@ impl<M: Model> Ord for Event<M> {
 }
 
 impl<M: Model> Event<M> {
-    pub(crate) fn id(&self) -> ClosureId {
+    pub(crate) fn id(&self) -> EventId {
         self.id
     }
 
@@ -63,7 +63,7 @@ impl<M: Model> Event<M> {
         let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
         let hash = hash_closure(&s, ptr);
         Event {
-            id: ClosureId(hash),
+            id: EventId(hash),
             inner: EventInner::OnClick(Rc::new(move || f(&s))),
         }
     }
@@ -72,7 +72,7 @@ impl<M: Model> Event<M> {
         let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
         let hash = hash_closure(&s, ptr);
         Event {
-            id: ClosureId(hash),
+            id: EventId(hash),
             inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
         }
     }
