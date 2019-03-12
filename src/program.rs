@@ -88,6 +88,7 @@ pub fn application<M: Model>(
     })?;
 
     let link_listener = intercept_links::<M, _>(location, downcast_cpy, on_url_request)?;
+    // We leak this listener because it will be valid for the life of the program
     Box::leak(Box::new(link_listener));
 
     Ok(())

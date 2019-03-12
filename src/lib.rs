@@ -49,7 +49,7 @@ struct App<M: Model> {
     // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
     on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
-    listeners: HashMap<EventId, (usize, Listener<M>)>,
+    listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
 }
 
 thread_local! {
@@ -148,11 +148,16 @@ impl<M: Model> App<M> {
     }
 
     fn stash_event_listener(&mut self, id: EventId, listener: Listener<M>) {
-        // It is possible for the "same" closure to exist on the page in several places at once
-        // (e.g. a logout button) so we maintain a refcount the ensure we do not
-        // free it before we should
-        let mut entry = self.listeners.entry(id).or_insert((0, listener));
+        // Here we wish to stash the Listeners until the corresponding events are removed from the dom.
+        // However, the EventId is not guaranteed to be unique because it is possible for the "same"
+        // closure to exist on the page in several places at once
+        // (e.g. a logout button) SO we maintain a refcount the ensure we do not
+        // free it before we should. This is a bit of a hack, because we are forced to
+        // keep all listeners of the same EventId alive until none of them are needed any more
+        // XXX This is a potential memory leak
+        let mut entry = self.listeners.entry(id).or_insert((0, Vec::new()));
         entry.0 += 1; // increment refct
+        entry.1.push(listener);
     }
 
     fn remove_event_listener(&mut self, id: &EventId) {
