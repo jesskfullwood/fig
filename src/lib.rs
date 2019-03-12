@@ -34,8 +34,16 @@ pub use web_sys::console::log_1;
 type JsResult<T> = Result<T, JsValue>;
 
 /// A trait to link togather a Model type and a Msg type.
-pub trait Model: 'static + Debug {
+pub trait Model: 'static + Sized + Debug {
     type Msg;
+
+    fn no_cmd(self) -> (Self, Cmd<Self::Msg>) {
+        (self, Cmd::none())
+    }
+
+    fn with_cmd(self, cmd: Cmd<Self::Msg>) -> (Self, Cmd<Self::Msg>) {
+        (self, cmd)
+    }
 }
 
 type Str = Cow<'static, str>;
