@@ -8,7 +8,7 @@ use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{Element as DomElement, Event as DomEvent, HtmlElement};
 
 use crate::util;
-use crate::{log, App, Cmd, JsResult, Model, Str};
+use crate::{App, Cmd, JsResult, Model, Str};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub(crate) struct EventId(u64);
@@ -104,7 +104,6 @@ pub(crate) struct Listener<M: Model> {
 
 impl<M: Model> Drop for Listener<M> {
     fn drop(&mut self) {
-        log!("Detaching listener for {}", self.type_);
         self.element
             .remove_event_listener_with_callback(&self.type_, self.closure.as_ref().unchecked_ref())
             .expect("failed to remove");
@@ -163,7 +162,6 @@ pub(crate) fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Ms
     handler: F,
 ) -> JsResult<Listener<M>> {
     let event_name = event_name.into();
-    log!("New event hander closure");
     let cb = closure1::<M, _, _>(handler);
     let jsfunction = cb.as_ref().unchecked_ref();
     element.add_event_listener_with_callback(&event_name, jsfunction)?;

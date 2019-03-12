@@ -29,6 +29,7 @@ pub use program::{application, sandbox};
 pub use url::Url;
 
 pub use wasm_bindgen::JsValue;
+pub use web_sys::console::log_1;
 
 type JsResult<T> = Result<T, JsValue>;
 
@@ -48,7 +49,7 @@ struct App<M: Model> {
     // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
     on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
-    listeners: HashMap<EventId, Listener<M>>,
+    listeners: HashMap<EventId, (usize, Listener<M>)>,
 }
 
 thread_local! {
@@ -110,6 +111,7 @@ impl<M: Model> App<M> {
         // Don't render the new dom until we finish looping
         log!("update vdom");
         self.current_vdom = self.render_dom()?;
+        log!("Registered events: {}", self.listeners.len());
         // returns that it did rerender
         Ok(())
     }
@@ -146,14 +148,20 @@ impl<M: Model> App<M> {
     }
 
     fn stash_event_listener(&mut self, id: EventId, listener: Listener<M>) {
-        // TODO A closure of the same ID could already exists, until we properly
-        // detach and dispose of all listeners
-        self.listeners.insert(id, listener);
-        log!("Stashed events: {}", self.listeners.len());
+        // It is possible for the "same" closure to exist on the page in several places at once
+        // (e.g. a logout button) so we maintain a refcount the ensure we do not
+        // free it before we should
+        let mut entry = self.listeners.entry(id).or_insert((0, listener));
+        entry.0 += 1; // increment refct
     }
 
-    fn remove_event_listener(&mut self, id: &EventId) -> Option<Listener<M>> {
-        self.listeners.remove(id)
+    fn remove_event_listener(&mut self, id: &EventId) {
+        if let Some(entry) = self.listeners.get_mut(id) {
+            entry.0 -= 1;
+            if entry.0 == 0 {
+                self.listeners.remove(id);
+            }
+        }
     }
 }
 
@@ -170,7 +178,6 @@ fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
     root: DomElement,
     handler: F,
 ) -> JsResult<Listener<M>> {
-    log!("Intercepting links");
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
@@ -584,7 +591,6 @@ fn remove_attr_from_element(attr: &Attribute, element: &DomElement) -> JsResult<
 }
 
 fn update_events<M: Model>(element: &DomElement, events: &[Delta<&Event<M>>]) -> JsResult<()> {
-    log!("Replacing listeners");
     for delta in events {
         match delta {
             Delta::Add(event) => {
