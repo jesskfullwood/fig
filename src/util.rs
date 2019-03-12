@@ -1,7 +1,5 @@
 use crate::{Cmd, DomElement, JsResult, JsValue, UrlRequest};
 
-pub use web_sys::console::log_1;
-
 #[macro_export]
 macro_rules! log {
     ($($t:tt)*) => ($crate::log_1(&format_args!($($t)*).to_string().into()))

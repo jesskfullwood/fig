@@ -170,6 +170,7 @@ impl<M: Model> App<M> {
     }
 }
 
+/// A token which grants permission to use various library features
 pub struct Key(());
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -469,8 +470,9 @@ impl<Msg> Cmd<Msg> {
         Cmd(CmdInner::Spawn(Box::new(fut)))
     }
 
-    pub fn push_url(s: impl Into<Str>) -> Self {
-        Cmd(CmdInner::PushUrl(s.into()))
+    // TODO require a Key to change the url
+    pub fn push_url(s: impl std::fmt::Display) -> Self {
+        Cmd(CmdInner::PushUrl(format!("{}", s).into()))
     }
 
     pub fn load_url(s: impl Into<Str>) -> Self {
