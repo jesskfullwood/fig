@@ -127,14 +127,14 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     }
 }
 
-fn fetch_selected(val: String) -> impl Future<Item = Msg, Error = JsValue> {
+fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = JsValue> {
     log!("Fetch: '{}'", val);
     fetch::Request::new("http://localhost:8001")
         .method(fetch::Method::Post)
         .header("Content-Type", "application/json")
         .body_json(&Data { data: val })
         .fetch_json()
-        .map(|data: Data| Msg::FetchedSelected(data.data))
+        .map(|data: Data| Cmd::msg(Msg::FetchedSelected(data.data)))
 }
 
 fn view(model: &Model) -> Html<Model> {

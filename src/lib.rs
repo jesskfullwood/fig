@@ -91,9 +91,15 @@ impl<M: Model> App<M> {
                     self.model.replace(new_model);
                     cmd = new_cmd; // we go again
                 }
+                CmdInner::Multiple(cmds) => {
+                    for cmd in cmds {
+                        self.loop_update(cmd)?
+                    }
+                    break
+                }
                 CmdInner::Spawn(request) => {
-                    let fut = request.map(|msg: M::Msg| {
-                        App::<M>::with(|app| app.loop_update(Cmd::msg(msg)).expect("update failed"))
+                    let fut = request.map(|cmd: Cmd<M::Msg>| {
+                        App::<M>::with(|app| app.loop_update(cmd).expect("update failed"))
                     });
                     fetch::spawn_local(fut);
                     break;
@@ -453,6 +459,10 @@ fn render_diff<'a, M: Model>(
     Ok(())
 }
 
+/// An event loop command.
+///
+/// Can cause various side effects (e.g. `fetch` requests, access local storage).
+/// See the various constructors for further explanation
 pub struct Cmd<Msg>(CmdInner<Msg>);
 
 enum CmdInner<Msg> {
@@ -460,29 +470,49 @@ enum CmdInner<Msg> {
     /// Indicates that no work should be done (no diffing or rendering)
     NoOp,
     Msg(Msg),
-    Spawn(Box<Future<Item = Msg, Error = JsValue>>),
+    Multiple(Vec<Cmd<Msg>>),
+    Spawn(Box<Future<Item = Cmd<Msg>, Error = JsValue>>),
     LoadUrl(Str),
     PushUrl(Str),
 }
 
 impl<Msg> Cmd<Msg> {
+    /// Do nothing
     pub fn none() -> Self {
         Cmd(CmdInner::None)
     }
 
+    /// Send a message to the `update` function. The page is rendered after all messages
+    /// in a chain have been run.
+    ///
+    /// Care should be taken not to create an infinite chain of messages as this will
+    /// effectively block the event loop
     pub fn msg(msg: Msg) -> Self {
         Cmd(CmdInner::Msg(msg))
     }
 
-    pub fn spawn(fut: impl Future<Item = Msg, Error = JsValue> + 'static) -> Self {
+    /// Run multiple commands. The commands are run in turn and the page is
+    /// rendered after each has completed.
+    ///
+    /// This command is useful for spawning mulitple futures at once
+    pub fn multiple(msgs: impl IntoIterator<Item=Cmd<Msg>>) -> Self {
+        Cmd(CmdInner::Multiple(msgs.into_iter().collect()))
+    }
+
+    /// Spawn a future. When the future resolves, the message will be run in the
+    /// event loop.
+    pub fn spawn(fut: impl Future<Item = Cmd<Msg>, Error = JsValue> + 'static) -> Self {
         Cmd(CmdInner::Spawn(Box::new(fut)))
     }
 
     // TODO require a Key to change the url
+    /// Change the page url to the supplied path
     pub fn push_url(s: impl std::fmt::Display) -> Self {
         Cmd(CmdInner::PushUrl(format!("{}", s).into()))
     }
 
+    // TODO require a Key to load the url
+    /// Load the supplied url. This forces a page reload (destroying the current app).
     pub fn load_url(s: impl Into<Str>) -> Self {
         Cmd(CmdInner::LoadUrl(s.into()))
     }
