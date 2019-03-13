@@ -8,7 +8,7 @@ edition = "2018"
 crate-type = ["cdylib"]
 
 [dependencies]
-tree = { path = "../../" }
+fig = { path = "../../" }
 wasm-bindgen = "0.2.37"
 web-sys = "0.3.14"
 futures = "0.1.25"

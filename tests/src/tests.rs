@@ -1,6 +1,6 @@
-use tree::html::{class, on_click, value};
-use tree::{button, div, option, p, select};
-use tree::{Html, Model};
+use fig::html::{class, on_click, value};
+use fig::{button, div, option, p, select};
+use fig::{Html, Model};
 
 struct M(i32);
 

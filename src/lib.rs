@@ -228,7 +228,7 @@ pub enum Delta<T> {
     Remove(T),
 }
 
-/// A tree describing which nodes have changed and how
+/// A fig describing which nodes have changed and how
 #[derive(Clone)]
 enum Diff<'a, M: Model> {
     Insert(&'a Html<M>),

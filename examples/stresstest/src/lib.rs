@@ -1,7 +1,7 @@
 use rand::Rng;
 use std::collections::BTreeMap;
-use tree::html::*;
-use tree::*;
+use fig::html::*;
+use fig::*;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug)]
@@ -15,7 +15,7 @@ enum Msg {
     Roll(u32, String),
 }
 
-impl tree::Model for Model {
+impl fig::Model for Model {
     type Msg = Msg;
 }
 
@@ -46,7 +46,7 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::application(
+    fig::application(
         |key, _| {
             (
                 Model {
@@ -64,7 +64,7 @@ pub fn render() {
         },
         view,
         update,
-        tree::util::on_url_request_force_load,
+        fig::util::on_url_request_force_load,
         |_| unimplemented!(),
         "app",
     )

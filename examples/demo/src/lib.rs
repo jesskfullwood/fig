@@ -1,9 +1,9 @@
 use futures::Future;
 use serde::{Deserialize, Serialize};
-use tree::fetch;
-use tree::html::*;
-use tree::select;
-use tree::*;
+use fig::fetch;
+use fig::html::*;
+use fig::select;
+use fig::*;
 // TODO remove this dependency
 use wasm_bindgen::prelude::*;
 
@@ -68,7 +68,7 @@ struct Data {
     data: String,
 }
 
-impl tree::Model for Model {
+impl fig::Model for Model {
     type Msg = Msg;
 }
 
@@ -141,7 +141,7 @@ fn view(model: &Model) -> Html<Model> {
     log!("rendering model: {:?}", model);
     div!(
         id("my-app"),
-        h1!("Tree demo"),
+        h1!("Fig demo"),
         p!("Enter some ", b!("text"), " if you please!"),
         div!(
             input!(
@@ -201,11 +201,11 @@ fn view(model: &Model) -> Html<Model> {
 
 #[wasm_bindgen]
 pub fn render() {
-    tree::application(
+    fig::application(
         |_key, url| (Model::default(), on_url_change(url)),
         view,
         update,
-        tree::util::on_url_request_intercept,
+        fig::util::on_url_request_intercept,
         on_url_change,
         "app",
     )

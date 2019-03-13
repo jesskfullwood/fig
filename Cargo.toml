@@ -1,5 +1,5 @@
 [package]
-name = "tree"
+name = "fig"
 version = "0.1.0"
 authors = ["jesskfulwood <jesskfulwood@gmail.com>"]
 edition = "2018"
@@ -8,7 +8,6 @@ edition = "2018"
 derive_more = "0.14.0"
 wasm-bindgen = "0.2.37"
 js-sys = "0.3.14"
-treediff = "3.0.1"
 console_error_panic_hook = "0.1.6"
 serde = "1.0.89"
 wasm-bindgen-futures = "0.3.14"

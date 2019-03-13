@@ -1,4 +1,4 @@
-# Tree
+# Fig
 
 A Rust frontend web framework which aims to match the semantics of
 [The Elm Architecture](https://guide.elm-lang.org/architecture/) as closely as possible.
