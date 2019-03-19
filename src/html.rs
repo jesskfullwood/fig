@@ -163,6 +163,7 @@ attr_def! {
     Placeholder => Str => placeholder,
     Selected => () => selected,
     Style => Style => style,
+    Type => Str => type_,
     Value => Str => value
 }
 
@@ -177,7 +178,7 @@ impl Attribute {
             Class(classes) => classes.join(" ").into(),
             Disabled(()) => "disabled".into(),
             Selected(()) => "selected".into(),
-            Href(val) | Id(val) | Placeholder(val) | Value(val) => val.clone(),
+            Href(val) | Id(val) | Placeholder(val) | Value(val) | Type(val) => val.clone(),
             Style(style) => style.to_string().into(),
         }
     }
@@ -196,10 +197,11 @@ macro_rules! attr_key_value_func {
     };
 }
 
-attr_key_value_func!(id, Id);
-attr_key_value_func!(value, Value);
-attr_key_value_func!(placeholder, Placeholder);
 attr_key_value_func!(href, Href);
+attr_key_value_func!(id, Id);
+attr_key_value_func!(placeholder, Placeholder);
+attr_key_value_func!(type_, Type);
+attr_key_value_func!(value, Value);
 
 #[macro_export]
 macro_rules! class {
@@ -238,7 +240,7 @@ macro_rules! style {
         {
             let mut sty = ::std::collections::BTreeMap::new();
             $(sty.insert($key.into(), $val.into());)*;
-            Attribute::style(Style::new(sty))
+            $crate::html::Attribute::style($crate::html::Style::new(sty))
         }
     }
 }
