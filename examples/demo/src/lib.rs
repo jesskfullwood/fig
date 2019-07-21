@@ -1,9 +1,10 @@
-use futures::Future;
-use serde::{Deserialize, Serialize};
 use fig::fetch;
 use fig::html::*;
 use fig::select;
+use fig::Model as _;
 use fig::*;
+use futures::Future;
+use serde::{Deserialize, Serialize};
 // TODO remove this dependency
 use wasm_bindgen::prelude::*;
 
@@ -75,55 +76,43 @@ impl fig::Model for Model {
 fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     log!("update model with message: {:?}", msg);
     match msg {
-        Msg::Select(select) => (Model { select, ..model }, Cmd::none()),
-        Msg::FetchSelected(val) => (model, Cmd::spawn(fetch_selected(val))),
-        Msg::FetchedSelected(val) => (
-            Model {
-                server_says: Some(val),
-                ..model
+        Msg::Select(select) => Model { select, ..model }.no_cmd(),
+        Msg::FetchSelected(val) => model.with_cmd(Cmd::spawn(fetch_selected(val))),
+        Msg::FetchedSelected(val) => Model {
+            server_says: Some(val),
+            ..model
+        }
+        .no_cmd(),
+        Msg::ToggleCheck => Model {
+            check: !model.check,
+            ..model
+        }
+        .no_cmd(),
+        Msg::Input(input) => Model {
+            input: input.to_ascii_lowercase(),
+            ..model
+        }
+        .no_cmd(),
+        Msg::ButtonClick => Model {
+            click_ct: model.click_ct + 1,
+            ..model
+        }
+        .no_cmd(),
+        Msg::AddLi => Model {
+            list_ct: model.list_ct + 1,
+            ..model
+        }
+        .no_cmd(),
+        Msg::RmLi => Model {
+            list_ct: if model.list_ct > 0 {
+                model.list_ct - 1
+            } else {
+                0
             },
-            Cmd::none(),
-        ),
-        Msg::ToggleCheck => (
-            Model {
-                check: !model.check,
-                ..model
-            },
-            Cmd::none(),
-        ),
-        Msg::Input(input) => (
-            Model {
-                input: input.to_ascii_lowercase(),
-                ..model
-            },
-            Cmd::none(),
-        ),
-        Msg::ButtonClick => (
-            Model {
-                click_ct: model.click_ct + 1,
-                ..model
-            },
-            Cmd::none(),
-        ),
-        Msg::AddLi => (
-            Model {
-                list_ct: model.list_ct + 1,
-                ..model
-            },
-            Cmd::none(),
-        ),
-        Msg::RmLi => (
-            Model {
-                list_ct: if model.list_ct > 0 {
-                    model.list_ct - 1
-                } else {
-                    0
-                },
-                ..model
-            },
-            Cmd::none(),
-        ),
-        Msg::Route(route) => (Model { route, ..model }, Cmd::none()),
+            ..model
+        }
+        .no_cmd(),
+        Msg::Route(route) => Model { route, ..model }.no_cmd(),
     }
 }
 

@@ -95,7 +95,7 @@ impl<M: Model> App<M> {
                     for cmd in cmds {
                         self.loop_update(cmd)?
                     }
-                    break
+                    break;
                 }
                 CmdInner::Spawn(request) => {
                     let fut = request.map(|cmd: Cmd<M::Msg>| {
@@ -494,8 +494,8 @@ impl<Msg> Cmd<Msg> {
     /// Run multiple commands. The commands are run in turn and the page is
     /// rendered after each has completed.
     ///
-    /// This command is useful for spawning mulitple futures at once
-    pub fn multiple(msgs: impl IntoIterator<Item=Cmd<Msg>>) -> Self {
+    /// This command is useful for spawning multiple futures at once
+    pub fn multiple(msgs: impl IntoIterator<Item = Cmd<Msg>>) -> Self {
         Cmd(CmdInner::Multiple(msgs.into_iter().collect()))
     }
 
