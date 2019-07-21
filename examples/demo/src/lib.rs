@@ -116,14 +116,19 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     }
 }
 
-fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = JsValue> {
+fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
     log!("Fetch: '{}'", val);
-    fetch::Request::new("http://localhost:8001")
+    fetch::Request::new("http://localhost:8001".to_string())
         .method(fetch::Method::Post)
-        .header("Content-Type", "application/json")
-        .body_json(&Data { data: val })
-        .fetch_json()
-        .map(|data: Data| Cmd::msg(Msg::FetchedSelected(data.data)))
+        .send_json(&Data { data: val })
+        .fetch_json_data(|res: Result<Data, _>| {
+            if let Ok(data) = res {
+                Cmd::msg(Msg::FetchedSelected(data.data))
+            } else {
+                // TODO display the error somewhere
+                Cmd::none()
+            }
+        })
 }
 
 fn view(model: &Model) -> Html<Model> {
