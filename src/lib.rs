@@ -52,10 +52,10 @@ struct App<M: Model> {
     window: Window,
     target: HtmlDivElement,
     model: Option<M>,
-    update: Box<Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
-    view: Box<Fn(&M) -> Html<M>>,
+    update: Box<dyn Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
+    view: Box<dyn Fn(&M) -> Html<M>>,
     // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
-    on_url_change: Box<Fn(url::Url) -> Cmd<M::Msg>>,
+    on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
 }
@@ -98,10 +98,15 @@ impl<M: Model> App<M> {
                     break;
                 }
                 CmdInner::Spawn(request) => {
-                    let fut = request.map(|cmd: Cmd<M::Msg>| {
-                        App::<M>::with(|app| app.loop_update(cmd).expect("update failed"))
+                    let fut = request.then(|res: Result<Cmd<M::Msg>, Cmd<M::Msg>>| {
+                        let cmd = match res {
+                            Ok(ok) => ok,
+                            Err(e) => e,
+                        };
+                        App::<M>::with(|app| app.loop_update(cmd).expect("update failed"));
+                        Ok(())
                     });
-                    fetch::spawn_local(fut);
+                    wasm_bindgen_futures::spawn_local(fut);
                     break;
                 }
                 CmdInner::LoadUrl(urlstr) => {
@@ -471,7 +476,7 @@ enum CmdInner<Msg> {
     NoOp,
     Msg(Msg),
     Multiple(Vec<Cmd<Msg>>),
-    Spawn(Box<Future<Item = Cmd<Msg>, Error = JsValue>>),
+    Spawn(Box<dyn Future<Item = Cmd<Msg>, Error = Cmd<Msg>>>),
     LoadUrl(Str),
     PushUrl(Str),
 }
@@ -501,7 +506,7 @@ impl<Msg> Cmd<Msg> {
 
     /// Spawn a future. When the future resolves, the message will be run in the
     /// event loop.
-    pub fn spawn(fut: impl Future<Item = Cmd<Msg>, Error = JsValue> + 'static) -> Self {
+    pub fn spawn(fut: impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> + 'static) -> Self {
         Cmd(CmdInner::Spawn(Box::new(fut)))
     }
 
@@ -665,7 +670,7 @@ pub struct Timer<M: Model> {
     id: i32,
     interval_ms: u32,
     #[allow(dead_code)]
-    cb: Closure<FnMut()>,
+    cb: Closure<dyn FnMut()>,
     _marker: std::marker::PhantomData<M>,
 }
 

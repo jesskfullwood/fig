@@ -19,8 +19,8 @@ pub struct Event<M: Model> {
 }
 
 pub(crate) enum EventInner<M: Model> {
-    OnClick(Rc<Fn() -> M::Msg>),
-    OnInput(Rc<Fn(String) -> M::Msg>),
+    OnClick(Rc<dyn Fn() -> M::Msg>),
+    OnInput(Rc<dyn Fn(String) -> M::Msg>),
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
@@ -98,7 +98,7 @@ pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) 
 pub(crate) struct Listener<M: Model> {
     element: DomElement,
     type_: Str,
-    closure: Closure<FnMut(DomEvent)>,
+    closure: Closure<dyn FnMut(DomEvent)>,
     marker: std::marker::PhantomData<M>,
 }
 
@@ -117,7 +117,7 @@ impl<M: Model> Debug for Listener<M> {
 }
 
 impl<M: Model> Listener<M> {
-    fn new(element: DomElement, type_: Str, closure: Closure<FnMut(DomEvent)>) -> Listener<M> {
+    fn new(element: DomElement, type_: Str, closure: Closure<dyn FnMut(DomEvent)>) -> Listener<M> {
         Listener {
             element,
             type_,
@@ -129,7 +129,7 @@ impl<M: Model> Listener<M> {
 
 pub(crate) fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(
     mut handler: F,
-) -> Closure<FnMut()> {
+) -> Closure<dyn FnMut()> {
     Closure::wrap(Box::new(move || {
         web_sys::console::time();
         let cmd = handler();
@@ -137,12 +137,12 @@ pub(crate) fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(
             app.loop_update(cmd).expect("Update error");
         });
         web_sys::console::time_end();
-    }) as Box<FnMut()>)
+    }) as Box<dyn FnMut()>)
 }
 
 pub(crate) fn closure1<M: Model, T, F: FnMut(T) -> Cmd<M::Msg> + 'static>(
     mut handler: F,
-) -> Closure<FnMut(T)>
+) -> Closure<dyn FnMut(T)>
 where
     T: wasm_bindgen::convert::FromWasmAbi + 'static,
 {
@@ -153,7 +153,7 @@ where
             app.loop_update(cmd).expect("Update error");
         });
         web_sys::console::time_end();
-    }) as Box<FnMut(T)>)
+    }) as Box<dyn FnMut(T)>)
 }
 
 pub(crate) fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
