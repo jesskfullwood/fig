@@ -6,11 +6,14 @@ use crate::event::Event;
 
 macro_rules! make_html_tags {
     ($d:tt, $($typ:ident => $text:ident),* $(,)?) => {
+        // We construct an enum with variants for each HTML tag
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub enum Tag {
             $($typ,)*
         }
 
+        // Impl display. This is how the tag will actually appear in html.
+        // Basically just lowercased varaint name
         impl std::fmt::Display for Tag {
             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 use Tag::*;
@@ -22,13 +25,19 @@ macro_rules! make_html_tags {
         }
 
         $(
+            // Now we create a macro corresponding to each variant.
             #[macro_export]
             macro_rules! $text {
-                ($d($modifier:expr),* $d(,)?) => {
+                ($d($html:expr),* $d(,)?) => {
                     {
-                        use $crate::{Element, html::{Tag, ElemMod}};
+                        use $crate::{Element, html::{Tag, AcceptParent}};
+                        // We create a new Element containing the particular Tag variant
                         let mut element = Element::tag(Tag::$typ);
-                        $d($modifier.modify_element(&mut element);)*;
+                        // For each child Html<Model>, pass it the element
+                        // (i.e. the element 'visits' each child).
+                        // the '$d' is in fact the dollar symbol. Clever hack or nasty hack?
+                        $d($html.accept_parent_element(&mut element);)*;
+                        // Wrap the element as Html<Model> and return
                         Html::from(element)
                     }
                 }
@@ -40,6 +49,8 @@ macro_rules! make_html_tags {
 make_html_tags! {
     // Why do we pass in the weird '$' symbol? Workaround for macro_rules bug - see
     // https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
+    // Would be nice to remove the stuttering here, but I think that would
+    // require a proc_macro
     $,
     A => a,
     B => b,
@@ -270,72 +281,72 @@ macro_rules! style {
     }
 }
 
-pub trait ElemMod<M: Model> {
-    fn modify_element(self, elem: &mut Element<M>);
+pub trait AcceptParent<M: Model> {
+    fn accept_parent_element(self, elem: &mut Element<M>);
 }
 
-impl<M: Model> ElemMod<M> for &'static str {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for &'static str {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.children.push(Html::from(Str::from(self)))
     }
 }
 
-impl<M: Model> ElemMod<M> for String {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for String {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.children.push(Html::from(Str::from(self)))
     }
 }
 
-impl<M: Model> ElemMod<M> for Str {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Str {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.children.push(Html::from(self))
     }
 }
 
-impl<M: Model, E: ElemMod<M>> ElemMod<M> for Vec<E> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model, E: AcceptParent<M>> AcceptParent<M> for Vec<E> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         for modifier in self {
-            modifier.modify_element(elem)
+            modifier.accept_parent_element(elem)
         }
     }
 }
 
-impl<M: Model> ElemMod<M> for Attribute {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Attribute {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.attrs.push(self)
     }
 }
 
-impl<M: Model> ElemMod<M> for Option<Attribute> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Option<Attribute> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         if let Some(attr) = self {
             elem.attrs.push(attr)
         }
     }
 }
 
-impl<M: Model> ElemMod<M> for Event<M> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Event<M> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.events.push(self)
     }
 }
 
-impl<M: Model> ElemMod<M> for Option<Event<M>> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Option<Event<M>> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         if let Some(event) = self {
             elem.events.push(event)
         }
     }
 }
 
-impl<M: Model> ElemMod<M> for Html<M> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Html<M> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.children.push(self)
     }
 }
 
-impl<M: Model> ElemMod<M> for Option<Html<M>> {
-    fn modify_element(self, elem: &mut Element<M>) {
+impl<M: Model> AcceptParent<M> for Option<Html<M>> {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
         if let Some(inner) = self {
             elem.children.push(inner)
         }

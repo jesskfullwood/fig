@@ -398,7 +398,7 @@ impl Request {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     ///fn send_request(
     ///    request_controller: &mut Option<fetch::RequestController>
     ///) -> impl Future<Item=Msg, Error=Msg> {
@@ -428,7 +428,7 @@ impl Request {
     ///
     /// # Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     ///fn send_request() -> impl Future<Item=Msg, Error=Msg> {
     ///    fetch::Request::new(get_request_url())
     ///        .fetch(Msg::Fetched)
