@@ -33,7 +33,10 @@ pub use web_sys::console::log_1;
 
 type JsResult<T> = Result<T, JsValue>;
 
-/// A trait to link togather a Model type and a Msg type.
+/// A trait to associate a Model with a Msg type.
+///
+/// Necessary to ensure a Model is used with the corrent Msg and vice-versa
+// TODO is it actually necessary?
 pub trait Model: 'static + Sized + Debug {
     type Msg;
 
@@ -53,8 +56,25 @@ impl Model for () {
     type Msg = ();
 }
 
+// Convenience alias
 type Str = Cow<'static, str>;
 
+/// The core application.
+///
+/// At page load, the user create calls `application(..)` or similar, which creates an App
+/// in a thread-local. Unfortunately we have to use `unsafe` and stash it as a void pointer,
+/// because the App is generic over the Model and this cannot be expressed in safe Rust.
+///
+/// The app kicks off an initial page render. Thereafter, any page event will call an internal function
+/// which casts the App back from the void pointer and call `app.update(msg)`, creating a new
+/// Model and forcing another page render. This is why all functions need to be tagged with the
+/// Model trait, so we know which Model to cast too!
+///
+/// Any side-effect (e.g. fetching url, updating a model value) is handled ONLY through
+/// passing a `Cmd` to the `update` function. This ensures the functional reactive loop
+/// (command -> update -> view -> command...) is never broken
+///
+/// For simplicity and safety, we keep App hidden from the user at all times.
 struct App<M: Model> {
     window: Window,
     target: HtmlDivElement,
@@ -84,6 +104,13 @@ impl<M: Model + Debug> Debug for App<M> {
 }
 
 impl<M: Model> App<M> {
+    /// Update the model with the given Cmd
+    ///
+    /// Each command may trigger another command, and we do not want to render
+    /// each time, so we call update in an infinite loop and explicitly break
+    /// when we eventually receive a `None` command.
+    ///
+    /// After breaking the loop, we re-render the DOM
     fn loop_update(&mut self, Cmd(mut cmd): Cmd<M::Msg>) -> JsResult<()> {
         let mut loopct = 0;
         loop {
@@ -100,6 +127,8 @@ impl<M: Model> App<M> {
                 }
                 CmdInner::Multiple(cmds) => {
                     for cmd in cmds {
+                        // TODO hmm, this will actually re-render after each command
+                        // not sure if we the effort to avoid it
                         self.loop_update(cmd)?
                     }
                     break;
@@ -127,6 +156,7 @@ impl<M: Model> App<M> {
                     self.push_state(&urlstr).expect("Failed to push state");
                     // Then grab the new href from Location
                     let url = self.location().expect("No location");
+                    // and go round again
                     cmd = ((self.on_url_change)(url)).0;
                 }
             }
@@ -155,6 +185,8 @@ impl<M: Model> App<M> {
         Ok(new_vdom)
     }
 
+    /// Run a function with the App as an argument. This involves unsafely casting from a
+    /// void pointer stashed in a thread-local!
     fn with<R>(f: impl FnOnce(&mut Self) -> R) -> R {
         APP.with(|mut ptr| {
             let ptr: *mut u8 = **ptr.borrow_mut();
@@ -163,11 +195,13 @@ impl<M: Model> App<M> {
         })
     }
 
+    /// Update the browser url
     fn push_state(&self, url: &str) -> JsResult<()> {
         let history = self.window.history().expect("No history");
         history.push_state_with_url(&JsValue::NULL, "", Some(&url))
     }
 
+    /// Fetch the browser url
     fn location(&self) -> JsResult<url::Url> {
         let urlstr = self.window.location().href()?;
         url::Url::parse(&urlstr).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -180,7 +214,7 @@ impl<M: Model> App<M> {
         // (e.g. a logout button) SO we maintain a refcount the ensure we do not
         // free it before we should. This is a bit of a hack, because we are forced to
         // keep all listeners of the same EventId alive until none of them are needed any more
-        // XXX This is a potential memory leak
+        // XXX This is a potential memory leak.
         let mut entry = self.listeners.entry(id).or_insert((0, Vec::new()));
         entry.0 += 1; // increment refct
         entry.1.push(listener);
@@ -205,23 +239,29 @@ pub enum UrlRequest {
     External(String),
 }
 
-fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
+// Intercept link clicks and handle them ourselves.
+// Requires us to set a global listener for clicks.
+fn set_link_click_handler<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
     location: Location,
     root: DomElement,
     handler: F,
 ) -> JsResult<Listener<M>> {
     let cb = move |event: DomEvent| -> Cmd<M::Msg> {
+        // Was it an anchor tag that was clicked?
         let target: web_sys::EventTarget = event.target().expect("Missing target");
         let target_el: &DomElement = target.dyn_ref().expect("Not an Element");
         if target_el.tag_name() != "A" {
-            // short circuit
+            // if not, do nothing
             return Cmd(CmdInner::NoOp);
         }
+        // if so, first stop default (navigating away)
         event.prevent_default();
         let target_el: &web_sys::HtmlAnchorElement = target_el.dyn_ref().expect("Not an anchor");
+        // TODO no need for reflection here
         let urlstr = util::get_str_prop(target_el, "href").expect("No href");
         let ahost = util::get_str_prop(target_el, "host").expect("No anchor host");
         let req = if ahost == location.host().expect("No location host") {
+            // Then parse the url
             let url = url::Url::parse(&urlstr)
                 .map_err(|e| JsValue::from_str(&e.to_string()))
                 .expect("Url parse failed");
@@ -229,8 +269,10 @@ fn intercept_links<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
         } else {
             UrlRequest::External(urlstr)
         };
+        // and send to the handler
         handler(req)
     };
+    // set the handler on all clicks, on the given (root) node
     event::event_handler(root, "click", cb)
 }
 
@@ -540,7 +582,7 @@ pub fn subscription_handle<M: Model>(
 }
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
-/// Represents a DOM Node
+/// Represents a HTML DOM Node
 #[derive(Debug, From)]
 pub enum Html<M: Model> {
     Text(Str),

@@ -36,6 +36,7 @@ pub fn application<M: Model>(
     on_url_change: impl Fn(url::Url) -> Cmd<M::Msg> + 'static,
     target: &str,
 ) -> JsResult<()> {
+    // Set the hook to get sensible(ish) error messages upon panic
     console_error_panic_hook::set_once();
     let window = web_sys::window().expect("No global `window` exists");
     let document = window.document().expect("No document");
@@ -45,7 +46,7 @@ pub fn application<M: Model>(
         .get_element_by_id(target)
         .expect("Target element not found");
     let target: HtmlDivElement = target.dyn_into()?;
-    let downcast_cpy: DomElement = target.clone().dyn_into().unwrap();
+    let root_elem: DomElement = target.clone().dyn_into().unwrap();
     let initial = document.create_element(&Tag::Div.to_string())?;
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
@@ -87,7 +88,7 @@ pub fn application<M: Model>(
         app.loop_update(initcmd)
     })?;
 
-    let link_listener = intercept_links::<M, _>(location, downcast_cpy, on_url_request)?;
+    let link_listener = set_link_click_handler::<M, _>(location, downcast_cpy, on_url_request)?;
     // We leak this listener because it will be valid for the life of the program
     Box::leak(Box::new(link_listener));
 

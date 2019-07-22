@@ -6,9 +6,10 @@ use crate::event::Event;
 
 macro_rules! make_html_tags {
     ($d:tt, $($typ:ident => $text:ident),* $(,)?) => {
-        // We construct an enum with variants for each HTML tag
+        /// Represents an HTML element tag
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub enum Tag {
+            // We construct an enum with variants for each HTML tag
             $($typ,)*
         }
 
@@ -144,7 +145,7 @@ impl_to_html!(A, B, C, D, E, F, G, H, I, J, K);
 impl_to_html!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-/// Represents an Element attribute.
+/// Represents an HTML element attribute.
 // TODO move constructor funcs to own module
 pub struct Attribute(pub(crate) AttributeInner);
 
@@ -281,6 +282,7 @@ macro_rules! style {
     }
 }
 
+/// Trait that allows that type to be visted by an Element
 pub trait AcceptParent<M: Model> {
     fn accept_parent_element(self, elem: &mut Element<M>);
 }
