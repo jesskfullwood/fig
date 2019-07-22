@@ -10,9 +10,30 @@ use web_sys::{Element as DomElement, Event as DomEvent, HtmlElement};
 use crate::util;
 use crate::{App, Cmd, JsResult, Model, Str};
 
+// The EventId is a subtle thing.
+//
+// For a responsive app, we want quick rendering. For
+// quick rendering, we don't want to repaint the whole DOM each time, so we use a shadow DOM.
+// We diff the shadow DOM on each change, and only re-render the nodes that have changed.
+// But what about event callbacks (onClick, etc)? How will we know if they have changed?
+// We can't 'simply' compare them (in rust) because the callbacks are closures and do not
+// impl PartialEq. We could use bare fn pointers instead, which are PartialEq, but then
+// they become rather pointless because we can't pass data from our Model. (Suppose we select
+// an option from a list, then we want the callback to send the selected option value).
+//
+// One solution is just to remove and re-add them each time, but that isn't cool.
+// Instead we make a dubious compromise. We use a Closure struct which stashes the function pointer
+// and its arguments, and hashes them all together to give our unique Id - the EventId!
+// We use this value to compare Closures and work out whether anything has changed. Is that safe,
+// or totally broken as a concept?
+//
+// When we call the closure, we simply pass the arguments into the fn pointer.
+// This unfortunately gives a horrible API, like: `on_click((), |()| Msg::Clicked)` instead of
+// just `on_click(|| Msg::Clicked)`. Is it worth it??
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub(crate) struct EventId(u64);
 
+/// Opaque type representing a DOM event (e.g. onClick, onInput)
 pub struct Event<M: Model> {
     id: EventId,
     pub(crate) inner: EventInner<M>,
@@ -94,6 +115,7 @@ pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) 
 }
 
 /// Represents a listener attached to the DOM.
+///
 /// When it is dropped it will detach the corresponding listener.
 pub(crate) struct Listener<M: Model> {
     element: DomElement,

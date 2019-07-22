@@ -1,5 +1,5 @@
 use crate::{
-    intercept_links, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Tag, UrlRequest, APP,
+    set_link_click_handler, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Tag, UrlRequest, APP,
 };
 
 use wasm_bindgen::JsCast;
@@ -88,7 +88,7 @@ pub fn application<M: Model>(
         app.loop_update(initcmd)
     })?;
 
-    let link_listener = set_link_click_handler::<M, _>(location, downcast_cpy, on_url_request)?;
+    let link_listener = set_link_click_handler::<M, _>(location, root_elem, on_url_request)?;
     // We leak this listener because it will be valid for the life of the program
     Box::leak(Box::new(link_listener));
 
