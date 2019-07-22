@@ -184,8 +184,13 @@ impl Attribute {
     }
 
     #[doc(hidden)] // Prefer the `style!` macro
-    pub fn style(style: Style) -> Attribute {
-        Attribute(AttributeInner::Style(style))
+    pub fn style(style: Style) -> Self {
+        Self(AttributeInner::Style(style))
+    }
+
+    #[doc(hidden)] // prefer the `class!` macro
+    pub fn class(classes: Vec<Str>) -> Self {
+        Self(AttributeInner::Class(classes))
     }
 }
 
@@ -204,24 +209,32 @@ attr_key_value_func!(type_, Type);
 attr_key_value_func!(value, Value);
 
 #[macro_export]
+/// Add one or more classes to the element.
+///
+/// ### Example
+/// ```rust
+/// # #[macro_use] extern crate fig; use fig::*;
+/// # fn main() { let _: Html<()> =
+/// p![class!["warning", "unhappy", "bad"], "I am not happy :("]
+/// # ;}
+/// ```
 macro_rules! class {
     ($($item:expr),* $(,)?) => {
-        $crate::html::class(vec![$(<::std::borrow::Cow<'static, str>>::from($item),)*])
+        $crate::html::Attribute::class(vec![$(<::std::borrow::Cow<'static, str>>::from($item),)*])
     }
 }
 
-pub fn class(classes: Vec<Str>) -> Attribute {
-    Attribute(AttributeInner::Class(classes))
-}
-
+/// Add the `selected` attribute to an element
 pub fn selected() -> Attribute {
     Attribute(AttributeInner::Selected(()))
 }
 
+/// Add the `disabled` attribute to an element
 pub fn disabled() -> Attribute {
     Attribute(AttributeInner::Disabled(()))
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Constructor)]
 pub struct Style(BTreeMap<String, String>);
 
@@ -234,6 +247,18 @@ impl std::fmt::Display for Style {
     }
 }
 
+/// Add styling to an element
+///
+/// ### Example
+/// ```rust
+/// # #[macro_use] extern crate fig; use fig::*;
+/// # fn main() { let _: Html<()> =
+/// div![
+///     style! { "height" => "100px", "width" => "500px", "background-color" => "blue" },
+///     p!["Stylish div!"]
+/// ]
+/// # ;}
+/// ```
 #[macro_export]
 macro_rules! style {
     ($($key:expr =>  $val:expr),* $(,)?) => {

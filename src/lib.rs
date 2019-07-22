@@ -46,6 +46,13 @@ pub trait Model: 'static + Sized + Debug {
     }
 }
 
+// This impl is so we can do quick examples and tests for Html layout.
+// It might be best only to activate for tests
+// (but see https://github.com/rust-lang/rust/issues/45599)
+impl Model for () {
+    type Msg = ();
+}
+
 type Str = Cow<'static, str>;
 
 struct App<M: Model> {
