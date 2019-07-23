@@ -354,3 +354,21 @@ impl<M: Model> AcceptParent<M> for Option<Html<M>> {
         }
     }
 }
+
+// TODO macro-ify
+impl<M: Model> AcceptParent<M> for (Html<M>, Html<M>) {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
+        let (l, r) = self;
+        elem.children.push(l);
+        elem.children.push(r);
+    }
+}
+
+impl<M: Model> AcceptParent<M> for (Html<M>, Html<M>, Html<M>) {
+    fn accept_parent_element(self, elem: &mut Element<M>) {
+        let (l, m, r) = self;
+        elem.children.push(l);
+        elem.children.push(m);
+        elem.children.push(r);
+    }
+}
