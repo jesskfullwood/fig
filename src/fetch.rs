@@ -562,7 +562,7 @@ impl Request {
         // @TODO: once await/async stabilized, refactor
         self.fetch_string(identity)
             .then(|fetch_object_result| {
-                debug!("Sending fetch");
+                trace!("Sending fetch");
                 let fetch_object: FetchObject<String> = fetch_object_result.unwrap();
                 let fetch_result = fetch_object.result;
                 let request = fetch_object.request;

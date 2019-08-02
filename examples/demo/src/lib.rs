@@ -133,7 +133,7 @@ fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>>
 }
 
 fn view(model: &Model) -> Html<Model> {
-    debug!("Rendering model: {:?}", model);
+    trace!("Rendering model: {:?}", model);
     div!(
         id("my-app"),
         h1!("Fig demo"),

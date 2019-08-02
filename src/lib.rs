@@ -167,9 +167,9 @@ impl<M: Model> App<M> {
             }
         }
         // Don't render the new dom until we finish looping
-        debug!("Update vdom");
+        trace!("Update vdom");
         self.current_vdom = self.render_dom()?;
-        debug!("Registered events: {}", self.listeners.len());
+        trace!("Registered events: {}", self.listeners.len());
         // returns that it did rerender
         Ok(())
     }
@@ -178,9 +178,9 @@ impl<M: Model> App<M> {
         let new_vdom = (self.view)(self.model.as_ref().unwrap());
         let diff = diff_vdom(&self.current_vdom, &new_vdom);
         if let Diff::Unchanged = diff {
-            debug!("No change");
+            trace!("No change");
         } else {
-            debug!("vdom diff: {:?}", diff);
+            trace!("vdom diff: {:?}", diff);
             let document = self.window.document().expect("No document");
             render_diff(&self.target, &[(0, diff)], &document)?;
         }
