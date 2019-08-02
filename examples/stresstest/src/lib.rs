@@ -1,3 +1,4 @@
+use log::info;
 use rand::Rng;
 use std::collections::BTreeMap;
 use fig::html::*;
@@ -22,7 +23,7 @@ impl fig::Model for Model {
 fn update(msg: Msg, mut model: Model) -> (Model, Cmd<Msg>) {
     match msg {
         Msg::Roll(id, text) => {
-            log!("Roll!");
+            info!("Roll!");
             if model.divs.len() > 100 {
                 model.divs = BTreeMap::new();
             }

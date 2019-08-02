@@ -29,7 +29,7 @@ use crate::{App, Cmd, JsResult, Model, Str};
 //
 // When we call the closure, we simply pass the arguments into the fn pointer.
 // This unfortunately gives a horrible API, like: `on_click((), |()| Msg::Clicked)` instead of
-// just `on_click(|| Msg::Clicked)`. Is it worth it??
+// just `on_click(|| Msg::Clicked)`. Is it worth it?? Maybe it can be fixed with some nice macros
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub(crate) struct EventId(u64);
 

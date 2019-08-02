@@ -14,3 +14,4 @@ web-sys = "0.3.25"
 futures = "0.1.28"
 serde_json = "1.0.40"
 serde = { version = "1.0.97", features = ["derive"] }
+log = "0.4.8"

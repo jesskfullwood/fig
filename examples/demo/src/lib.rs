@@ -3,6 +3,7 @@ use fig::html::*;
 use fig::select;
 use fig::Model as _;
 use fig::*;
+use log::{debug, info};
 use futures::Future;
 use serde::{Deserialize, Serialize};
 // TODO remove this dependency
@@ -41,7 +42,7 @@ enum Route {
 }
 
 fn on_url_change(url: Url) -> Cmd<Msg> {
-    log!("Url change");
+    info!("Url changed: {}", url);
     let route = match url.path() {
         "/" => Route::Home,
         "/items" => Route::Items,
@@ -74,7 +75,7 @@ impl fig::Model for Model {
 }
 
 fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
-    log!("update model with message: {:?}", msg);
+    info!("Update model with message: {:?}", msg);
     match msg {
         Msg::Select(select) => Model { select, ..model }.no_cmd(),
         Msg::FetchSelected(val) => model.with_cmd(Cmd::spawn(fetch_selected(val))),
@@ -117,7 +118,7 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
 }
 
 fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
-    log!("Fetch: '{}'", val);
+    info!("Fetch: '{}'", val);
     fetch::Request::new("http://localhost:8001".to_string())
         .method(fetch::Method::Post)
         .send_json(&Data { data: val })
@@ -132,7 +133,7 @@ fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>>
 }
 
 fn view(model: &Model) -> Html<Model> {
-    log!("rendering model: {:?}", model);
+    debug!("Rendering model: {:?}", model);
     div!(
         id("my-app"),
         h1!("Fig demo"),

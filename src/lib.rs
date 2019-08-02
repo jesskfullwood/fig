@@ -32,7 +32,6 @@ pub use program::{application, sandbox};
 pub use url::Url;
 
 pub use wasm_bindgen::JsValue;
-pub use web_sys::console::log_1;
 
 type JsResult<T> = Result<T, JsValue>;
 

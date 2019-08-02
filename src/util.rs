@@ -1,10 +1,5 @@
 use crate::{Cmd, DomElement, JsResult, JsValue, UrlRequest};
 
-#[macro_export]
-macro_rules! log {
-    ($($t:tt)*) => ($crate::log_1(&format_args!($($t)*).to_string().into()))
-}
-
 pub fn get_session<T: serde::de::DeserializeOwned>() -> JsResult<T> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window"))?;
     let storage = window
