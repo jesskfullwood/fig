@@ -3,6 +3,9 @@
 //! Based closely upon The [Elm](https://elm-lang.org/) Architecture.
 //!
 
+#[macro_use]
+extern crate log;
+
 use derive_more::{Constructor, From};
 use futures::Future;
 use wasm_bindgen::{closure::Closure, JsCast};
@@ -93,7 +96,7 @@ thread_local! {
 
 impl<M: Model> Drop for App<M> {
     fn drop(&mut self) {
-        log!("Warning: dropping app!")
+        error!("Dropping app! This is an error")
     }
 }
 
@@ -165,9 +168,9 @@ impl<M: Model> App<M> {
             }
         }
         // Don't render the new dom until we finish looping
-        log!("update vdom");
+        debug!("Update vdom");
         self.current_vdom = self.render_dom()?;
-        log!("Registered events: {}", self.listeners.len());
+        debug!("Registered events: {}", self.listeners.len());
         // returns that it did rerender
         Ok(())
     }
@@ -176,9 +179,9 @@ impl<M: Model> App<M> {
         let new_vdom = (self.view)(self.model.as_ref().unwrap());
         let diff = diff_vdom(&self.current_vdom, &new_vdom);
         if let Diff::Unchanged = diff {
-            log!("No change");
+            debug!("No change");
         } else {
-            log!("vdom diff: {:?}", diff);
+            debug!("vdom diff: {:?}", diff);
             let document = self.window.document().expect("No document");
             render_diff(&self.target, &[(0, diff)], &document)?;
         }

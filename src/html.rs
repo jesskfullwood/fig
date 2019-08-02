@@ -355,6 +355,10 @@ impl<M: Model> AcceptParent<M> for Option<Html<M>> {
     }
 }
 
+impl<M: Model> AcceptParent<M> for () {
+    fn accept_parent_element(self, _elem: &mut Element<M>) {}
+}
+
 // TODO macro-ify
 impl<M: Model> AcceptParent<M> for (Html<M>, Html<M>) {
     fn accept_parent_element(self, elem: &mut Element<M>) {

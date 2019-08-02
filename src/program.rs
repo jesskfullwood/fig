@@ -14,6 +14,7 @@ pub fn sandbox<M: Model>(
     update: impl Fn(M::Msg, M) -> M + 'static,
     target: &str,
 ) -> JsResult<()> {
+    info!("Launching sandbox");
     application(
         |_, _| (init, Cmd::none()),
         view,
@@ -36,6 +37,7 @@ pub fn application<M: Model>(
     on_url_change: impl Fn(url::Url) -> Cmd<M::Msg> + 'static,
     target: &str,
 ) -> JsResult<()> {
+    info!("Launching application");
     // Set the hook to get sensible(ish) error messages upon panic
     console_error_panic_hook::set_once();
     let window = web_sys::window().expect("No global `window` exists");
