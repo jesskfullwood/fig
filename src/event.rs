@@ -149,6 +149,10 @@ impl<M: Model> Listener<M> {
     }
 }
 
+// TODO This is an internal function, but needs to be accessible to external libs?
+/// Wrap a function returning a Cmd into a web_sys::Closure that updates the App
+///
+/// The idea is to create a javascript callback that interacts with our App
 pub(crate) fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(
     mut handler: F,
 ) -> Closure<dyn FnMut()> {

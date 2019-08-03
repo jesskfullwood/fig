@@ -14,9 +14,11 @@ use web_sys::{
     Window,
 };
 
+use std::any::{Any, TypeId};
 use std::borrow::{BorrowMut, Cow};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 
 use event::{Event, EventId, Listener};
 use html::{Attribute, Tag};
@@ -25,6 +27,7 @@ pub mod event;
 pub mod fetch;
 pub mod html;
 pub mod program;
+pub mod socket;
 pub mod util;
 
 pub use event::{on_click, on_input};
@@ -83,10 +86,11 @@ struct App<M: Model> {
     model: Option<M>,
     update: Box<dyn Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
     view: Box<dyn Fn(&M) -> Html<M>>,
-    // subscriptions: Box<Fn(&M) -> Sub<M::Msg>>,
     on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
+    subscribe: Box<dyn Fn(&M) -> Sub<M::Msg>>,
+    subscriptions: HashMap<TypeId, Vec<Box<dyn Subscription>>>
 }
 
 thread_local! {
@@ -574,13 +578,40 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
-/// Take a subscription callback and hook it into the main event loop
-// TODO this should.. be done better, somehow
-pub fn subscription_handle<M: Model>(
-    _key: Key,
-    f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
-) -> impl Fn() -> Cmd<M::Msg> {
-    move || -> Cmd<M::Msg> { App::<M>::with(|app| f(app.model.as_ref().expect("No model"))) }
+pub struct Sub<Msg>(SubInner<Msg>);
+
+enum SubInner<Msg> {
+    None(PhantomData<Msg>),
+    Sub { build: Box<dyn Fn()>, teardown: Box<dyn Fn()> }, // This is the function we call to destroy
+    Batch(Vec<Sub<Msg>>)
+}
+
+impl<Msg> Sub<Msg> {
+    fn none() -> Self {
+        Self(SubInner::None(PhantomData))
+    }
+
+    fn batch(batch: Vec<Self>) -> Self {
+        Self(SubInner::Batch(batch))
+    }
+}
+
+trait Subscription: ErasedEq {
+    fn subscribe(&mut self, key: Key);
+}
+
+trait ErasedEq {
+    fn eq(&self, other: &dyn Any) -> bool;
+}
+
+impl<T> ErasedEq for T where T: PartialEq + Sized + 'static {
+    fn eq(&self, other: &dyn Any) -> bool {
+        if let Some(o) = other.downcast_ref::<Self>() {
+            self == o
+        } else {
+            false
+        }
+    }
 }
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
@@ -718,11 +749,10 @@ fn update_attrs(element: &DomElement, attrs: &[Delta<&Attribute>]) -> JsResult<(
 }
 
 pub struct Timer<M: Model> {
-    id: i32,
+    callback_id: Option<i32>,
     interval_ms: u32,
-    #[allow(dead_code)]
-    cb: Closure<dyn FnMut()>,
-    _marker: std::marker::PhantomData<M>,
+    // TODO make a proper closure type?
+    trigger: fn() -> Cmd<M::Msg>,
 }
 
 impl<M: Model + Debug> Debug for Timer<M> {
@@ -733,24 +763,34 @@ impl<M: Model + Debug> Debug for Timer<M> {
 
 impl<M: Model> Timer<M> {
     pub fn new(
-        key: Key,
         interval_ms: u32,
-        f: impl Fn(&M) -> Cmd<M::Msg> + 'static,
-    ) -> JsResult<Timer<M>> {
-        // XXX Technically this is not typesafe - the user
-        // could 'lie' about the type of M and we cannot enforce it
-        let handle = subscription_handle(key, f);
-        let cb = event::closure0::<M, _>(handle);
+        trigger: fn() -> Cmd<M::Msg>
+    ) -> Timer<M> {
+        Timer {
+            callback_id: None,
+            interval_ms,
+            trigger
+        }
+    }
+}
+
+impl<M: Model> PartialEq for Timer<M> {
+    fn eq(&self, other: &Self) -> bool {
+        self.interval_ms == other.interval_ms
+            && self.trigger == other.trigger
+    }
+}
+
+impl<M: Model> Subscription for Timer<M> {
+    fn subscribe(&mut self, key: Key) {
+        let cb = event::closure0::<M, _>(self.trigger);
         let jsfunction = cb.as_ref().unchecked_ref();
         let window = web_sys::window().expect("No global `window` exists");
-        window
-            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, interval_ms as i32)
-            .map(|id| Timer {
-                id,
-                interval_ms,
-                cb,
-                _marker: std::marker::PhantomData,
-            })
+        match window
+            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, self.interval_ms as i32) {
+                Ok(id) => { self.callback_id = Some(id) }
+                Err(e) => panic!("{:?}", e)
+            };
     }
 }
 
@@ -758,7 +798,7 @@ impl<M: Model> Drop for Timer<M> {
     fn drop(&mut self) {
         web_sys::window()
             .map(|window| {
-                window.clear_interval_with_handle(self.id);
+                window.clear_interval_with_handle(self.callback_id.expect("No timer id"));
             })
             .unwrap_or(())
     }

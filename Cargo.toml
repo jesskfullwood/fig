@@ -28,6 +28,7 @@ features = [
   'Document',
   'DomException',
   'Element',
+  'ErrorEvent',
   'Event',
   'EventTarget',
   'FetchEvent',
@@ -42,6 +43,7 @@ features = [
   'HtmlTextAreaElement',
   'InputEvent',
   'Location',
+  'MessageEvent',
   'Node',
   'NodeList',
   'ReferrerPolicy',
@@ -54,5 +56,6 @@ features = [
   'Response',
   'Storage',
   'Text',
+  'WebSocket',
   'Window',
 ]
