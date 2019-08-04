@@ -19,6 +19,8 @@ pub fn sandbox<M: Model>(
         |_, _| (init, Cmd::none()),
         view,
         move |msg, model| (update(msg, model), Cmd::none()),
+        // no subscriptions
+        |_| Sub::none(),
         // on url change, just force a load
         crate::util::on_url_request_force_load,
         // no way to create Cmd::push_url so no way to
@@ -33,6 +35,7 @@ pub fn application<M: Model>(
     init: impl FnOnce(Key, url::Url) -> (M, Cmd<M::Msg>),
     view: impl Fn(&M) -> Html<M> + 'static,
     update: impl Fn(M::Msg, M) -> (M, Cmd<M::Msg>) + 'static,
+    subscribe: impl Fn(&M) -> Sub<M> + 'static,
     on_url_request: impl Fn(UrlRequest) -> Cmd<M::Msg> + 'static,
     on_url_change: impl Fn(url::Url) -> Cmd<M::Msg> + 'static,
     target: &str,
@@ -58,11 +61,11 @@ pub fn application<M: Model>(
         target,
         model: None,
         update: Box::new(update),
+        subscribe: Box::new(subscribe),
         view: Box::new(view),
         on_url_change: Box::new(on_url_change),
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
         listeners: HashMap::new(),
-        subscribe: Box::new(|_: &M| Sub::none()),
         subscriptions: HashMap::new()
     };
 

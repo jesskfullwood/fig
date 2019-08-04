@@ -85,12 +85,12 @@ struct App<M: Model> {
     target: HtmlDivElement,
     model: Option<M>,
     update: Box<dyn Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
+    subscribe: Box<dyn Fn(&M) -> Sub<M>>,
     view: Box<dyn Fn(&M) -> Html<M>>,
     on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
-    subscribe: Box<dyn Fn(&M) -> Sub<M::Msg>>,
-    subscriptions: HashMap<TypeId, Vec<Box<dyn Subscription>>>
+    subscriptions: HashMap<TypeId, Vec<Box<dyn Subscription<M>>>>
 }
 
 thread_local! {
@@ -123,7 +123,7 @@ impl<M: Model> App<M> {
             loopct += 1;
             match cmd {
                 CmdInner::None => break,
-                // return without rendering
+                // return without rendering. Generally need a Very Good Reason for this
                 CmdInner::NoOp => return Ok(()),
                 CmdInner::Msg(msg) => {
                     let model = self.model.take().unwrap();
@@ -170,12 +170,20 @@ impl<M: Model> App<M> {
                 panic!("Infinite loop!")
             }
         }
+        trace!("Update subscriptions");
+        self.update_subscriptions();
         // Don't render the new dom until we finish looping
         trace!("Update vdom");
         self.current_vdom = self.render_dom()?;
         trace!("Registered events: {}", self.listeners.len());
         // returns that it did rerender
         Ok(())
+    }
+
+    fn update_subscriptions(&mut self) {
+        let new_subs = (self.subscribe)(&self.model.as_ref().expect("Model missing"));
+        for sub in new_subs.0 {
+        }
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
@@ -578,25 +586,19 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
-pub struct Sub<Msg>(SubInner<Msg>);
+pub struct Sub<M: Model>(Vec<Box<dyn Subscription<M>>>);
 
-enum SubInner<Msg> {
-    None(PhantomData<Msg>),
-    Sub { build: Box<dyn Fn()>, teardown: Box<dyn Fn()> }, // This is the function we call to destroy
-    Batch(Vec<Sub<Msg>>)
-}
-
-impl<Msg> Sub<Msg> {
+impl<M: Model> Sub<M> {
     fn none() -> Self {
-        Self(SubInner::None(PhantomData))
+        Sub(Vec::new())
     }
 
-    fn batch(batch: Vec<Self>) -> Self {
-        Self(SubInner::Batch(batch))
+    fn new(ss: Vec<Box<dyn Subscription<M>>>) -> Self {
+        Sub(ss)
     }
 }
 
-trait Subscription: ErasedEq {
+trait Subscription<M: Model>: ErasedEq {
     fn subscribe(&mut self, key: Key);
 }
 
@@ -781,7 +783,7 @@ impl<M: Model> PartialEq for Timer<M> {
     }
 }
 
-impl<M: Model> Subscription for Timer<M> {
+impl<M: Model> Subscription<M> for Timer<M> {
     fn subscribe(&mut self, key: Key) {
         let cb = event::closure0::<M, _>(self.trigger);
         let jsfunction = cb.as_ref().unchecked_ref();
