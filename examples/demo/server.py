@@ -2,9 +2,10 @@
 
 from flask import (Flask, request, jsonify)
 from flask_cors import CORS
-
+from flask_socketio import SocketIO
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 CORS(app)
 
 LOOKUP = {
@@ -25,4 +26,4 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8001)
+    socketio.run(app, port=8001)

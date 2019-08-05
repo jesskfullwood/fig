@@ -3,7 +3,6 @@ use std::fmt::{self, Debug};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::event;
 use crate::{Cmd, Key, Model, Subscription};
 
 pub struct Timer<M: Model> {

@@ -1,6 +1,8 @@
 use fig::fetch;
 use fig::html::*;
 use fig::select;
+use fig::socket::Socket;
+use fig::timer::Timer;
 use fig::Model as _;
 use fig::*;
 use futures::Future;
@@ -19,6 +21,8 @@ struct Model {
     server_says: Option<String>,
     route: Route,
     ticker: bool,
+    socket: bool,
+    socket_message: Option<String>,
 }
 
 impl Default for Model {
@@ -32,6 +36,8 @@ impl Default for Model {
             server_says: None,
             route: Route::Home,
             ticker: false,
+            socket: false,
+            socket_message: None,
         }
     }
 }
@@ -65,7 +71,9 @@ enum Msg {
     FetchSelected(String),
     FetchedSelected(String),
     Route(Route),
+    SocketMessage(String),
     ToggleTicker,
+    ToggleSocket,
     Tick,
 }
 
@@ -118,6 +126,19 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
         }
         .no_cmd(),
         Msg::Route(route) => Model { route, ..model }.no_cmd(),
+        Msg::ToggleSocket => Model {
+            socket: !model.socket,
+            ..model
+        }
+        .no_cmd(),
+        Msg::SocketMessage(msg) => {
+            info!("Socket: {}", msg);
+            Model {
+                socket_message: Some(msg),
+                ..model
+            }
+        }
+        .no_cmd(),
         Msg::ToggleTicker => Model {
             ticker: !model.ticker,
             ..model
@@ -130,12 +151,25 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
     }
 }
 
+fn new_websocket() -> Socket<Model> {
+    Socket::new(
+        "ws://localhost:8001",
+        || Msg::SocketMessage("Connection opened".into()).into(),
+        |msg| Msg::SocketMessage(format!("Message: {:?}", msg)).into(),
+        |err| Msg::SocketMessage(format!("Error: {:?}", err)).into(),
+    )
+}
+
 fn subscriptions(model: &Model) -> Sub<Model> {
+    let mut subs: Vec<Box<dyn Subscription<_>>> = Vec::new();
     if model.ticker {
-        Sub::new(vec![Box::new(Timer::new(1000, || Cmd::msg(Msg::Tick)))])
-    } else {
-        Sub::none()
+        subs.push(Box::new(Timer::new(1000, || Cmd::msg(Msg::Tick))))
     }
+    if model.socket {
+        subs.push(Box::new(new_websocket()))
+    }
+
+    Sub::new(subs)
 }
 
 fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
@@ -175,6 +209,14 @@ fn view(model: &Model) -> Html<Model> {
                     "Ticker: Off"
                 },
                 on_click((), |()| Msg::ToggleTicker)
+            ),
+            button!(
+                if model.socket {
+                    "Websocket: Disconnect"
+                } else {
+                    "Websocket: Connect"
+                },
+                on_click((), |()| Msg::ToggleSocket)
             ),
             p!(class!("bluesy"), "Classy!"),
             button!(

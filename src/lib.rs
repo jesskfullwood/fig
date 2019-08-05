@@ -639,6 +639,12 @@ impl<Msg> Cmd<Msg> {
     }
 }
 
+impl<T> From<T> for Cmd<T> {
+    fn from(t: T) -> Self {
+        Cmd::msg(t)
+    }
+}
+
 pub struct Sub<M: Model>(Vec<Box<dyn Subscription<M>>>);
 
 impl<M: Model> Sub<M> {
