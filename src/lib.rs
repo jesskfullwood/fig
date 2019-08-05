@@ -90,7 +90,7 @@ struct App<M: Model> {
     on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
-    subscriptions: Vec<Box<dyn Subscription<M>>>
+    subscriptions: Vec<Box<dyn Subscription<M>>>,
 }
 
 thread_local! {
@@ -193,7 +193,7 @@ impl<M: Model> App<M> {
                 if nsub.erased_eq(sub) {
                     // we are already subscribed to nsub, make a note
                     seen_subs.insert(ix);
-                    continue 'outer
+                    continue 'outer;
                 }
             }
             // Fell through above loop, so this is a new subscription.
@@ -632,7 +632,10 @@ pub trait ErasedEq {
     fn erased_eq(&self, other: &dyn Any) -> bool;
 }
 
-impl<T> ErasedEq for T where T: PartialEq + Sized + 'static {
+impl<T> ErasedEq for T
+where
+    T: PartialEq + Sized + 'static,
+{
     fn erased_eq(&self, other: &dyn Any) -> bool {
         let name = std::any::type_name::<Self>();
         if let Some(o) = other.downcast_ref::<Self>() {
@@ -782,7 +785,7 @@ pub struct Timer<M: Model> {
     interval_ms: u32,
     // TODO make a proper closure type?
     trigger: fn() -> Cmd<M::Msg>,
-    callback: Option<Closure<dyn FnMut()>>
+    callback: Option<Closure<dyn FnMut()>>,
 }
 
 impl<M: Model + Debug> Debug for Timer<M> {
@@ -792,23 +795,19 @@ impl<M: Model + Debug> Debug for Timer<M> {
 }
 
 impl<M: Model> Timer<M> {
-    pub fn new(
-        interval_ms: u32,
-        trigger: fn() -> Cmd<M::Msg>
-    ) -> Timer<M> {
+    pub fn new(interval_ms: u32, trigger: fn() -> Cmd<M::Msg>) -> Timer<M> {
         Timer {
             callback_id: None,
             callback: None,
             interval_ms,
-            trigger
+            trigger,
         }
     }
 }
 
 impl<M: Model> PartialEq for Timer<M> {
     fn eq(&self, other: &Self) -> bool {
-        self.interval_ms == other.interval_ms
-            && self.trigger == other.trigger
+        self.interval_ms == other.interval_ms && self.trigger == other.trigger
     }
 }
 
@@ -817,11 +816,13 @@ impl<M: Model> Subscription<M> for Timer<M> {
         let cb = event::closure0::<M, _>(self.trigger);
         let jsfunction = cb.as_ref().unchecked_ref();
         let window = web_sys::window().expect("No global `window` exists");
-        match window
-            .set_interval_with_callback_and_timeout_and_arguments_0(jsfunction, self.interval_ms as i32) {
-                Ok(id) => { self.callback_id = Some(id) }
-                Err(e) => panic!("{:?}", e)
-            };
+        match window.set_interval_with_callback_and_timeout_and_arguments_0(
+            jsfunction,
+            self.interval_ms as i32,
+        ) {
+            Ok(id) => self.callback_id = Some(id),
+            Err(e) => panic!("{:?}", e),
+        };
         self.callback = Some(cb);
     }
 }
@@ -862,7 +863,8 @@ mod tests {
         assert!(!a1.erased_eq(&b));
         assert!(!b.erased_eq(&a1));
 
-        let t1: &T = &a1;
+        // FIXME problem! doesn't work once boxed as traits objs
+        let t1: Box<T> = Box::new(a1);
         let t2: Box<T> = Box::new(a2);
         assert!(t1.erased_eq(&t2));
     }

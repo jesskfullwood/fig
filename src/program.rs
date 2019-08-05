@@ -1,5 +1,6 @@
 use crate::{
-    set_link_click_handler, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Tag, UrlRequest, APP, Sub
+    set_link_click_handler, App, Cmd, Element, Html, JsResult, JsValue, Key, Model, Sub, Tag,
+    UrlRequest, APP,
 };
 
 use wasm_bindgen::JsCast;
@@ -67,7 +68,7 @@ pub fn application<M: Model>(
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
         listeners: HashMap::new(),
         // TODO this could be a hashmap to reduce On^2 complexity
-        subscriptions: Vec::new()
+        subscriptions: Vec::new(),
     };
 
     // put app on the heap...

@@ -3,8 +3,8 @@ use fig::html::*;
 use fig::select;
 use fig::Model as _;
 use fig::*;
-use log::{info, trace};
 use futures::Future;
+use log::{info, trace};
 use serde::{Deserialize, Serialize};
 // TODO remove this dependency
 use wasm_bindgen::prelude::*;
@@ -18,7 +18,7 @@ struct Model {
     list_ct: u32,
     server_says: Option<String>,
     route: Route,
-    ticker: bool
+    ticker: bool,
 }
 
 impl Default for Model {
@@ -31,7 +31,7 @@ impl Default for Model {
             list_ct: 5,
             server_says: None,
             route: Route::Home,
-            ticker: false
+            ticker: false,
         }
     }
 }
@@ -66,7 +66,7 @@ enum Msg {
     FetchedSelected(String),
     Route(Route),
     ToggleTicker,
-    Tick
+    Tick,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -118,7 +118,11 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
         }
         .no_cmd(),
         Msg::Route(route) => Model { route, ..model }.no_cmd(),
-        Msg::ToggleTicker => Model { ticker: !model.ticker, ..model }.no_cmd(),
+        Msg::ToggleTicker => Model {
+            ticker: !model.ticker,
+            ..model
+        }
+        .no_cmd(),
         Msg::Tick => {
             info!("TICK!!!");
             model.no_cmd()
@@ -165,7 +169,11 @@ fn view(model: &Model) -> Html<Model> {
         ),
         div!(
             button!(
-                if model.ticker { "Ticker: On" } else { "Ticker: Off" },
+                if model.ticker {
+                    "Ticker: On"
+                } else {
+                    "Ticker: Off"
+                },
                 on_click((), |()| Msg::ToggleTicker)
             ),
             p!(class!("bluesy"), "Classy!"),
