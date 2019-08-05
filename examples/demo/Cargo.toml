@@ -15,3 +15,4 @@ futures = "0.1.28"
 serde_json = "1.0.40"
 serde = { version = "1.0.97", features = ["derive"] }
 log = "0.4.8"
+console_log = "0.1.2"

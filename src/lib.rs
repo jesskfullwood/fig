@@ -90,7 +90,7 @@ struct App<M: Model> {
     on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
-    subscriptions: HashMap<TypeId, Vec<Box<dyn Subscription<M>>>>
+    subscriptions: Vec<Box<dyn Subscription<M>>>
 }
 
 thread_local! {
@@ -181,9 +181,34 @@ impl<M: Model> App<M> {
     }
 
     fn update_subscriptions(&mut self) {
-        let new_subs = (self.subscribe)(&self.model.as_ref().expect("Model missing"));
-        for sub in new_subs.0 {
+        // TODO I don't think this function is very elegant
+
+        let poss_new_subs = (self.subscribe)(&self.model.as_ref().expect("Model missing"));
+        let mut new_subs = Vec::new();
+        let mut seen_subs = bit_set::BitSet::new();
+
+        // check the possibly-new subs against existing ones
+        'outer: for mut nsub in poss_new_subs.0.into_iter() {
+            for (ix, sub) in self.subscriptions.iter().enumerate() {
+                if nsub.erased_eq(sub) {
+                    // we are already subscribed to nsub, make a note
+                    seen_subs.insert(ix);
+                    continue 'outer
+                }
+            }
+            // Fell through above loop, so this is a new subscription.
+            nsub.subscribe(Key(()));
+            new_subs.push(nsub);
         }
+        // Remove defunct subs
+        for ix in (0..self.subscriptions.len()).rev() {
+            // If we didn't identify an existing sub in poss_new_subs, then the subscription
+            // is defunct - remove it
+            if !seen_subs.contains(ix) {
+                self.subscriptions.remove(ix);
+            }
+        }
+        self.subscriptions.extend(new_subs);
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
@@ -589,25 +614,27 @@ impl<Msg> Cmd<Msg> {
 pub struct Sub<M: Model>(Vec<Box<dyn Subscription<M>>>);
 
 impl<M: Model> Sub<M> {
-    fn none() -> Self {
+    pub fn none() -> Self {
         Sub(Vec::new())
     }
 
-    fn new(ss: Vec<Box<dyn Subscription<M>>>) -> Self {
+    pub fn new(ss: Vec<Box<dyn Subscription<M>>>) -> Self {
         Sub(ss)
     }
 }
 
-trait Subscription<M: Model>: ErasedEq {
+pub trait Subscription<M: Model>: ErasedEq {
     fn subscribe(&mut self, key: Key);
 }
 
-trait ErasedEq {
-    fn eq(&self, other: &dyn Any) -> bool;
+#[doc(hidden)]
+pub trait ErasedEq {
+    fn erased_eq(&self, other: &dyn Any) -> bool;
 }
 
 impl<T> ErasedEq for T where T: PartialEq + Sized + 'static {
-    fn eq(&self, other: &dyn Any) -> bool {
+    fn erased_eq(&self, other: &dyn Any) -> bool {
+        let name = std::any::type_name::<Self>();
         if let Some(o) = other.downcast_ref::<Self>() {
             self == o
         } else {
@@ -755,6 +782,7 @@ pub struct Timer<M: Model> {
     interval_ms: u32,
     // TODO make a proper closure type?
     trigger: fn() -> Cmd<M::Msg>,
+    callback: Option<Closure<dyn FnMut()>>
 }
 
 impl<M: Model + Debug> Debug for Timer<M> {
@@ -770,6 +798,7 @@ impl<M: Model> Timer<M> {
     ) -> Timer<M> {
         Timer {
             callback_id: None,
+            callback: None,
             interval_ms,
             trigger
         }
@@ -793,6 +822,7 @@ impl<M: Model> Subscription<M> for Timer<M> {
                 Ok(id) => { self.callback_id = Some(id) }
                 Err(e) => panic!("{:?}", e)
             };
+        self.callback = Some(cb);
     }
 }
 
@@ -803,5 +833,37 @@ impl<M: Model> Drop for Timer<M> {
                 window.clear_interval_with_handle(self.callback_id.expect("No timer id"));
             })
             .unwrap_or(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_erased_eq() {
+        #[derive(PartialEq)]
+        struct A(&'static str);
+        #[derive(PartialEq)]
+        struct B;
+
+        trait T: ErasedEq {}
+        impl T for A {}
+        impl T for B {}
+        let a1 = A("Hi");
+        let a2 = A("Hi");
+        let a3 = A("Bye");
+        let b = B;
+
+        assert!(a1.erased_eq(&a1));
+        assert!(a1.erased_eq(&a2));
+
+        assert!(!a1.erased_eq(&a3));
+        assert!(!a1.erased_eq(&b));
+        assert!(!b.erased_eq(&a1));
+
+        let t1: &T = &a1;
+        let t2: Box<T> = Box::new(a2);
+        assert!(t1.erased_eq(&t2));
     }
 }

@@ -66,7 +66,8 @@ pub fn application<M: Model>(
         on_url_change: Box::new(on_url_change),
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
         listeners: HashMap::new(),
-        subscriptions: HashMap::new()
+        // TODO this could be a hashmap to reduce On^2 complexity
+        subscriptions: Vec::new()
     };
 
     // put app on the heap...
