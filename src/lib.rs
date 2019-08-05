@@ -6,19 +6,18 @@
 #[macro_use]
 extern crate log;
 
+use downcast_rs::{Downcast, impl_downcast};
 use derive_more::{Constructor, From};
 use futures::Future;
-use wasm_bindgen::{closure::Closure, JsCast};
+use wasm_bindgen::{JsCast};
 use web_sys::{
     Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location, Node, Text,
     Window,
 };
 
-use std::any::{Any, TypeId};
 use std::borrow::{BorrowMut, Cow};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
-use std::marker::PhantomData;
 
 use event::{Event, EventId, Listener};
 use html::{Attribute, Tag};
@@ -29,6 +28,7 @@ pub mod html;
 pub mod program;
 pub mod socket;
 pub mod util;
+pub mod timer;
 
 pub use event::{on_click, on_input};
 pub use program::{application, sandbox};
@@ -190,13 +190,14 @@ impl<M: Model> App<M> {
         // check the possibly-new subs against existing ones
         'outer: for mut nsub in poss_new_subs.0.into_iter() {
             for (ix, sub) in self.subscriptions.iter().enumerate() {
-                if nsub.erased_eq(sub) {
+                if nsub.sub_eq(&**sub) {
                     // we are already subscribed to nsub, make a note
                     seen_subs.insert(ix);
                     continue 'outer;
                 }
             }
             // Fell through above loop, so this is a new subscription.
+            debug!("New subscription");
             nsub.subscribe(Key(()));
             new_subs.push(nsub);
         }
@@ -205,6 +206,7 @@ impl<M: Model> App<M> {
             // If we didn't identify an existing sub in poss_new_subs, then the subscription
             // is defunct - remove it
             if !seen_subs.contains(ix) {
+                debug!("Removing subscription");
                 self.subscriptions.remove(ix);
             }
         }
@@ -623,21 +625,25 @@ impl<M: Model> Sub<M> {
     }
 }
 
-pub trait Subscription<M: Model>: ErasedEq {
+pub trait Subscription<M: Model>: Downcast {
     fn subscribe(&mut self, key: Key);
+    fn sub_eq(&self, other: &dyn Subscription<M>) -> bool;
 }
 
+impl_downcast!(Subscription<M> where M: Model);
+
 #[doc(hidden)]
-pub trait ErasedEq {
-    fn erased_eq(&self, other: &dyn Any) -> bool;
+pub trait ErasedEq: Downcast {
+    fn erased_eq(&self, other: &dyn ErasedEq) -> bool;
 }
+
+impl_downcast!(ErasedEq);
 
 impl<T> ErasedEq for T
 where
     T: PartialEq + Sized + 'static,
 {
-    fn erased_eq(&self, other: &dyn Any) -> bool {
-        let name = std::any::type_name::<Self>();
+    fn erased_eq(&self, other: &dyn ErasedEq) -> bool {
         if let Some(o) = other.downcast_ref::<Self>() {
             self == o
         } else {
@@ -780,63 +786,6 @@ fn update_attrs(element: &DomElement, attrs: &[Delta<&Attribute>]) -> JsResult<(
     Ok(())
 }
 
-pub struct Timer<M: Model> {
-    callback_id: Option<i32>,
-    interval_ms: u32,
-    // TODO make a proper closure type?
-    trigger: fn() -> Cmd<M::Msg>,
-    callback: Option<Closure<dyn FnMut()>>,
-}
-
-impl<M: Model + Debug> Debug for Timer<M> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Timer {{ interval_ms: {} }}", self.interval_ms)
-    }
-}
-
-impl<M: Model> Timer<M> {
-    pub fn new(interval_ms: u32, trigger: fn() -> Cmd<M::Msg>) -> Timer<M> {
-        Timer {
-            callback_id: None,
-            callback: None,
-            interval_ms,
-            trigger,
-        }
-    }
-}
-
-impl<M: Model> PartialEq for Timer<M> {
-    fn eq(&self, other: &Self) -> bool {
-        self.interval_ms == other.interval_ms && self.trigger == other.trigger
-    }
-}
-
-impl<M: Model> Subscription<M> for Timer<M> {
-    fn subscribe(&mut self, key: Key) {
-        let cb = event::closure0::<M, _>(self.trigger);
-        let jsfunction = cb.as_ref().unchecked_ref();
-        let window = web_sys::window().expect("No global `window` exists");
-        match window.set_interval_with_callback_and_timeout_and_arguments_0(
-            jsfunction,
-            self.interval_ms as i32,
-        ) {
-            Ok(id) => self.callback_id = Some(id),
-            Err(e) => panic!("{:?}", e),
-        };
-        self.callback = Some(cb);
-    }
-}
-
-impl<M: Model> Drop for Timer<M> {
-    fn drop(&mut self) {
-        web_sys::window()
-            .map(|window| {
-                window.clear_interval_with_handle(self.callback_id.expect("No timer id"));
-            })
-            .unwrap_or(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -864,8 +813,10 @@ mod tests {
         assert!(!b.erased_eq(&a1));
 
         // FIXME problem! doesn't work once boxed as traits objs
-        let t1: Box<T> = Box::new(a1);
-        let t2: Box<T> = Box::new(a2);
-        assert!(t1.erased_eq(&t2));
+        let t1: Box<ErasedEq> = Box::new(a1);
+        let t2: Box<ErasedEq> = Box::new(a2);
+        let t3: Box<ErasedEq> = Box::new(b);
+        assert!(t1.erased_eq(&*t2));
+        assert!(!t1.erased_eq(&*t3));
     }
 }
