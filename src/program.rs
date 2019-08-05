@@ -33,7 +33,7 @@ pub fn sandbox<M: Model>(
 
 /// Run a single-page application, including routing and HTTP requests
 pub fn application<M: Model>(
-    init: impl FnOnce(Key, url::Url) -> (M, Cmd<M::Msg>),
+    init: impl FnOnce(Key<M>, url::Url) -> (M, Cmd<M::Msg>),
     view: impl Fn(&M) -> Html<M> + 'static,
     update: impl Fn(M::Msg, M) -> (M, Cmd<M::Msg>) + 'static,
     subscribe: impl Fn(&M) -> Sub<M> + 'static,
@@ -87,7 +87,7 @@ pub fn application<M: Model>(
     });
 
     // Now we prepare to initialize
-    let (model, initcmd) = init(Key(()), url);
+    let (model, initcmd) = init(Key::new(), url);
 
     // From this point on we only interact with App through App::with.
     // Then it's safe, hopefully.

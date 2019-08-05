@@ -3,8 +3,8 @@ use std::fmt::{self, Debug};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::{Subscription, Model, Key, Cmd};
 use crate::event;
+use crate::{Cmd, Key, Model, Subscription};
 
 pub struct Timer<M: Model> {
     callback_id: Option<i32>,
@@ -38,8 +38,8 @@ impl<M: Model> PartialEq for Timer<M> {
 }
 
 impl<M: Model> Subscription<M> for Timer<M> {
-    fn subscribe(&mut self, key: Key) {
-        let cb = event::closure0::<M, _>(self.trigger);
+    fn subscribe(&mut self, key: Key<M>) {
+        let cb = key.closure0(self.trigger);
         let jsfunction = cb.as_ref().unchecked_ref();
         let window = web_sys::window().expect("No global `window` exists");
         match window.set_interval_with_callback_and_timeout_and_arguments_0(

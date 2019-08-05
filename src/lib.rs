@@ -6,10 +6,10 @@
 #[macro_use]
 extern crate log;
 
-use downcast_rs::{Downcast, impl_downcast};
 use derive_more::{Constructor, From};
+use downcast_rs::{impl_downcast, Downcast};
 use futures::Future;
-use wasm_bindgen::{JsCast};
+use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
     Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location, Node, Text,
     Window,
@@ -18,6 +18,7 @@ use web_sys::{
 use std::borrow::{BorrowMut, Cow};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 
 use event::{Event, EventId, Listener};
 use html::{Attribute, Tag};
@@ -27,8 +28,8 @@ pub mod fetch;
 pub mod html;
 pub mod program;
 pub mod socket;
-pub mod util;
 pub mod timer;
+pub mod util;
 
 pub use event::{on_click, on_input};
 pub use program::{application, sandbox};
@@ -198,7 +199,7 @@ impl<M: Model> App<M> {
             }
             // Fell through above loop, so this is a new subscription.
             debug!("New subscription");
-            nsub.subscribe(Key(()));
+            nsub.subscribe(Key::new());
             new_subs.push(nsub);
         }
         // Remove defunct subs
@@ -272,7 +273,32 @@ impl<M: Model> App<M> {
 }
 
 /// A token which grants permission to use various library features
-pub struct Key(());
+pub struct Key<M: Model>(PhantomData<M>);
+
+impl<M: Model> Key<M> {
+    fn new() -> Key<M> {
+        Key(PhantomData)
+    }
+
+    /// Take a zero-argument callback and hook it into the main event loop
+    pub fn closure0<F: FnMut() -> Cmd<M::Msg> + 'static>(
+        &self,
+        handler: F,
+    ) -> Closure<dyn FnMut()> {
+        event::closure0::<M, F>(handler)
+    }
+
+    /// Take a single-argument callback and hook it into the main event loop
+    pub fn closure1<T, F: FnMut(T) -> Cmd<M::Msg> + 'static>(
+        &self,
+        handler: F,
+    ) -> Closure<dyn FnMut(T)>
+    where
+        T: wasm_bindgen::convert::FromWasmAbi + 'static,
+    {
+        event::closure1::<M, T, F>(handler)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UrlRequest {
@@ -625,8 +651,8 @@ impl<M: Model> Sub<M> {
     }
 }
 
-pub trait Subscription<M: Model>: Downcast {
-    fn subscribe(&mut self, key: Key);
+pub trait Subscription<M: Model>: Downcast + ErasedEq {
+    fn subscribe(&mut self, key: Key<M>);
     fn sub_eq(&self, other: &dyn Subscription<M>) -> bool;
 }
 
