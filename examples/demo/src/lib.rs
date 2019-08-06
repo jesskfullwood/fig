@@ -174,7 +174,7 @@ fn subscriptions(model: &Model) -> Sub<Model> {
 
 fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
     info!("Fetch: '{}'", val);
-    fetch::Request::new("http://localhost:8001".to_string())
+    fetch::Request::new("http://localhost:8000/api".to_string())
         .method(fetch::Method::Post)
         .send_json(&Data { data: val })
         .fetch_json_data(|res: Result<Data, _>| {
