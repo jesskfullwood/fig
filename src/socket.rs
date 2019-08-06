@@ -85,3 +85,11 @@ impl<M: Model> Subscription<M> for Socket<M> {
         }
     }
 }
+
+impl<M: Model> Drop for Socket<M> {
+    fn drop(&mut self) {
+        if let Some(ws) = &self.inner {
+            ws.close().expect("Socket failed to close")
+        }
+    }
+}

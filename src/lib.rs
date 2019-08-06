@@ -198,7 +198,7 @@ impl<M: Model> App<M> {
                 }
             }
             // Fell through above loop, so this is a new subscription.
-            debug!("New subscription");
+            trace!("New subscription");
             nsub.subscribe(Key::new());
             new_subs.push(nsub);
         }
@@ -207,7 +207,7 @@ impl<M: Model> App<M> {
             // If we didn't identify an existing sub in poss_new_subs, then the subscription
             // is defunct - remove it
             if !seen_subs.contains(ix) {
-                debug!("Removing subscription");
+                trace!("Removing subscription");
                 self.subscriptions.remove(ix);
             }
         }
@@ -657,32 +657,12 @@ impl<M: Model> Sub<M> {
     }
 }
 
-pub trait Subscription<M: Model>: Downcast + ErasedEq {
+pub trait Subscription<M: Model>: Downcast {
     fn subscribe(&mut self, key: Key<M>);
     fn sub_eq(&self, other: &dyn Subscription<M>) -> bool;
 }
 
 impl_downcast!(Subscription<M> where M: Model);
-
-#[doc(hidden)]
-pub trait ErasedEq: Downcast {
-    fn erased_eq(&self, other: &dyn ErasedEq) -> bool;
-}
-
-impl_downcast!(ErasedEq);
-
-impl<T> ErasedEq for T
-where
-    T: PartialEq + Sized + 'static,
-{
-    fn erased_eq(&self, other: &dyn ErasedEq) -> bool {
-        if let Some(o) = other.downcast_ref::<Self>() {
-            self == o
-        } else {
-            false
-        }
-    }
-}
 
 // See https://developer.mozilla.org/en-US/docs/Web/API/Node/nodeType
 /// Represents a HTML DOM Node
@@ -824,6 +804,28 @@ mod tests {
 
     #[test]
     fn test_erased_eq() {
+        // ErasedEq experiment
+        // TODO finish or remove
+        #[doc(hidden)]
+        pub trait ErasedEq: Downcast {
+            fn erased_eq(&self, other: &dyn ErasedEq) -> bool;
+        }
+
+        impl_downcast!(ErasedEq);
+
+        impl<T> ErasedEq for T
+        where
+            T: PartialEq + Sized + 'static,
+        {
+            fn erased_eq(&self, other: &dyn ErasedEq) -> bool {
+                if let Some(o) = other.downcast_ref::<Self>() {
+                    self == o
+                } else {
+                    false
+                }
+            }
+        }
+
         #[derive(PartialEq)]
         struct A(&'static str);
         #[derive(PartialEq)]

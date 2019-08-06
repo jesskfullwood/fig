@@ -21,7 +21,8 @@ struct Model {
     server_says: Option<String>,
     route: Route,
     ticker: bool,
-    socket: bool,
+    tick_on: bool,
+    socket: SocketState,
     socket_message: Option<String>,
 }
 
@@ -36,7 +37,8 @@ impl Default for Model {
             server_says: None,
             route: Route::Home,
             ticker: false,
-            socket: false,
+            tick_on: false,
+            socket: SocketState::Closed,
             socket_message: None,
         }
     }
@@ -71,7 +73,7 @@ enum Msg {
     FetchSelected(String),
     FetchedSelected(String),
     Route(Route),
-    SocketMessage(String),
+    SocketMessage(SocketMsg),
     ToggleTicker,
     ToggleSocket,
     Tick,
@@ -127,12 +129,19 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
         .no_cmd(),
         Msg::Route(route) => Model { route, ..model }.no_cmd(),
         Msg::ToggleSocket => Model {
-            socket: !model.socket,
+            socket: match model.socket {
+                SocketState::Closed => SocketState::TryOpen,
+                _ => SocketState::Closed,
+            },
             ..model
         }
         .no_cmd(),
-        Msg::SocketMessage(msg) => {
-            info!("Socket: {}", msg);
+        Msg::SocketMessage(SocketMsg::Opened) => Model {
+            socket: SocketState::Open,
+            ..model
+        }
+        .no_cmd(),
+        Msg::SocketMessage(SocketMsg::Msg(msg)) | Msg::SocketMessage(SocketMsg::Err(msg)) => {
             Model {
                 socket_message: Some(msg),
                 ..model
@@ -144,20 +153,36 @@ fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
             ..model
         }
         .no_cmd(),
-        Msg::Tick => {
-            info!("TICK!!!");
-            model.no_cmd()
+        Msg::Tick => Model {
+            tick_on: !model.tick_on,
+            ..model
         }
+        .no_cmd(),
     }
 }
 
 fn new_websocket() -> Socket<Model> {
     Socket::new(
-        "ws://localhost:8001",
-        || Msg::SocketMessage("Connection opened".into()).into(),
-        |msg| Msg::SocketMessage(format!("Message: {:?}", msg)).into(),
-        |err| Msg::SocketMessage(format!("Error: {:?}", err)).into(),
+        "ws://localhost:8000/ws",
+        || Msg::SocketMessage(SocketMsg::Opened).into(),
+        |msg| Msg::SocketMessage(SocketMsg::Msg(format!("Message: {:?}", msg))).into(),
+        |err| Msg::SocketMessage(SocketMsg::Err(format!("Error: {:?}", err))).into(),
     )
+}
+
+#[derive(Debug, Clone)]
+enum SocketState {
+    Closed,
+    TryOpen,
+    Pending,
+    Open,
+}
+
+#[derive(Debug, Clone)]
+enum SocketMsg {
+    Opened,
+    Msg(String),
+    Err(String),
 }
 
 fn subscriptions(model: &Model) -> Sub<Model> {
@@ -165,10 +190,11 @@ fn subscriptions(model: &Model) -> Sub<Model> {
     if model.ticker {
         subs.push(Box::new(Timer::new(1000, || Cmd::msg(Msg::Tick))))
     }
-    if model.socket {
+    if let SocketState::Closed = model.socket {
+        // To close the socket, we just dispose of it
+    } else {
         subs.push(Box::new(new_websocket()))
     }
-
     Sub::new(subs)
 }
 
@@ -210,11 +236,18 @@ fn view(model: &Model) -> Html<Model> {
                 },
                 on_click((), |()| Msg::ToggleTicker)
             ),
+            if model.ticker && model.tick_on {
+                Some(span!("TICK!"))
+            } else {
+                None
+            },
+        ),
+        div!(
             button!(
-                if model.socket {
-                    "Websocket: Disconnect"
-                } else {
+                if let SocketState::Closed = model.socket {
                     "Websocket: Connect"
+                } else {
+                    "Websocket: Disconnect"
                 },
                 on_click((), |()| Msg::ToggleSocket)
             ),

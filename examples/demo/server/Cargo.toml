@@ -10,3 +10,7 @@ edition = "2018"
 actix-files = "0.1.4"
 actix-web = "1.0.5"
 serde = { version = "1.0.98", features = ["derive"] }
+actix-web-actors = "1.0.2"
+actix = "0.8.3"
+env_logger = "0.6.2"
+log = "0.4.8"
