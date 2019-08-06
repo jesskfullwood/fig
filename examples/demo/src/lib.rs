@@ -174,7 +174,6 @@ fn new_websocket() -> Socket<Model> {
 enum SocketState {
     Closed,
     TryOpen,
-    Pending,
     Open,
 }
 
@@ -227,6 +226,13 @@ fn view(model: &Model) -> Html<Model> {
             ),
             p!(i!("Boldly repeat: "), b!(model.input.clone()))
         ),
+        p!(class!("bluesy"), "Classy!"),
+        div!(
+            button!(
+                on_click((), |()| Msg::ButtonClick),
+                format!("Clicked: {}", model.click_ct),
+            ),
+        ),
         div!(
             button!(
                 if model.ticker {
@@ -251,11 +257,9 @@ fn view(model: &Model) -> Html<Model> {
                 },
                 on_click((), |()| Msg::ToggleSocket)
             ),
-            p!(class!("bluesy"), "Classy!"),
-            button!(
-                on_click((), |()| Msg::ButtonClick),
-                format!("Clicked: {}", model.click_ct),
-            ),
+            span!(format!("State: {:?}", model.socket)),
+        ),
+        div!(
             select!(
                 on_input((), |(), sel| Msg::Select(sel)),
                 option!(value("this"), "this"),
