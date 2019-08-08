@@ -9,10 +9,11 @@ extern crate log;
 use derive_more::{Constructor, From};
 use downcast_rs::{impl_downcast, Downcast};
 use futures::Future;
+use js_sys::Function;
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location, Node, Text,
-    Window,
+    Document, Element as DomElement, Event as DomEvent, HtmlDivElement, Location, Node,
+    PopStateEvent, Text, Window,
 };
 
 use std::borrow::{BorrowMut, Cow};
@@ -88,7 +89,7 @@ struct App<M: Model> {
     update: Box<dyn Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
     subscribe: Box<dyn Fn(&M) -> Sub<M>>,
     view: Box<dyn Fn(&M) -> Html<M>>,
-    on_url_change: Box<dyn Fn(url::Url) -> Cmd<M::Msg>>,
+    on_url_change: &'static dyn Fn(url::Url) -> Cmd<M::Msg>,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
     subscriptions: Vec<Box<dyn Subscription<M>>>,
@@ -153,6 +154,7 @@ impl<M: Model> App<M> {
                     break;
                 }
                 CmdInner::LoadUrl(urlstr) => {
+                    // Navigating away from the page
                     let loc = self.window.location();
                     loc.set_href(&urlstr).expect("Failed to set location");
                     // This should ALWAYS force a reload so return without rendering
@@ -270,6 +272,24 @@ impl<M: Model> App<M> {
             }
         }
     }
+
+    /// Set the handler that will trigger a Route change when `window.popstate`
+    /// event is fired, e.g by the `back` button
+    fn set_popstate_handler(&self) {
+        let handler = move |_e: PopStateEvent| {
+            // Event state is just some state that was associated with the current url
+            // when pushState was called. Since we don't use it, it will be `null`
+            // We just want to force a page update with the new Route
+            App::<M>::with(|app| {
+                let url = app.location().expect("No location");
+                (app.on_url_change)(url)
+            })
+        };
+        let cb = crate::event::closure1::<M, _, _>(handler);
+        let onpop: &Function = cb.as_ref().unchecked_ref();
+        self.window.set_onpopstate(Some(onpop));
+        Box::leak(Box::new(cb));
+    }
 }
 
 /// A token which grants permission to use various library features
@@ -340,7 +360,7 @@ fn set_link_click_handler<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
         handler(req)
     };
     // set the handler on all clicks, on the given (root) node
-    event::event_handler(root, "click", cb)
+    event::attach_event_handler(root, "click", cb)
 }
 
 #[derive(Clone, Debug)]

@@ -166,10 +166,10 @@ pub(crate) fn closure0<M: Model, F: FnMut() -> Cmd<M::Msg> + 'static>(
     }) as Box<dyn FnMut()>)
 }
 
-pub(crate) fn closure1<M: Model, T, F: FnMut(T) -> Cmd<M::Msg> + 'static>(
-    mut handler: F,
-) -> Closure<dyn FnMut(T)>
+pub(crate) fn closure1<M, T, F>(mut handler: F) -> Closure<dyn FnMut(T)>
 where
+    M: Model,
+    F: FnMut(T) -> Cmd<M::Msg> + 'static,
     T: wasm_bindgen::convert::FromWasmAbi + 'static,
 {
     Closure::wrap(Box::new(move |val: T| {
@@ -178,15 +178,22 @@ where
         App::<M>::with(move |app| {
             app.loop_update(cmd).expect("Update error");
         });
+        // TODO make the instrumentation optional/use trace logging
         web_sys::console::time_end();
     }) as Box<dyn FnMut(T)>)
 }
 
-pub(crate) fn event_handler<M: Model, S: Into<Str>, F: Fn(DomEvent) -> Cmd<M::Msg> + 'static>(
+/// Attach an event handler to an element
+pub(crate) fn attach_event_handler<M, S, F>(
     element: DomElement,
     event_name: S,
     handler: F,
-) -> JsResult<Listener<M>> {
+) -> JsResult<Listener<M>>
+where
+    M: Model,
+    S: Into<Str>,
+    F: Fn(DomEvent) -> Cmd<M::Msg> + 'static,
+{
     let event_name = event_name.into();
     let cb = closure1::<M, _, _>(handler);
     let jsfunction = cb.as_ref().unchecked_ref();
@@ -205,7 +212,7 @@ fn input_handler<M: Model>(
             util::get_str_prop(target_el, "value").expect("missing value"),
         ))
     };
-    event_handler::<M, _, _>(element.clone(), "input", inner)
+    attach_event_handler::<M, _, _>(element.clone(), "input", inner)
 }
 
 fn click_handler<M: Model>(
@@ -213,7 +220,7 @@ fn click_handler<M: Model>(
     handler: Rc<dyn Fn() -> M::Msg>,
 ) -> JsResult<Listener<M>> {
     let inner = move |_event: DomEvent| Cmd::msg(handler());
-    event_handler::<M, _, _>(element.clone(), "click", inner)
+    attach_event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
 pub(crate) fn attach_event_listener<M: Model>(

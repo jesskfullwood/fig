@@ -57,14 +57,16 @@ pub fn application<M: Model>(
     target.set_inner_html(""); // blank the target div and create an initial root
     target.append_child(&*initial)?;
 
+    let on_url_change: &'static _ = Box::leak(Box::new(on_url_change));
+
     let app = App {
-        window,
+        window: window.clone(),
         target,
         model: None,
         update: Box::new(update),
         subscribe: Box::new(subscribe),
         view: Box::new(view),
-        on_url_change: Box::new(on_url_change),
+        on_url_change: on_url_change,
         current_vdom: Html::from(Element::tag(Tag::Div)), // now the dom and vdom are in sync
         listeners: HashMap::new(),
         // TODO this could be a hashmap to reduce On^2 complexity
@@ -92,11 +94,14 @@ pub fn application<M: Model>(
     // From this point on we only interact with App through App::with.
     // Then it's safe, hopefully.
     App::<M>::with(|app| {
+        app.set_popstate_handler();
         app.model = Some(model);
         // Run initial command, then rerender just to be sure
         app.loop_update(initcmd)
     })?;
 
+    // TODO should be a method on App
+    // Set the link listener. has to be done after app has initialised the root element
     let link_listener = set_link_click_handler::<M, _>(location, root_elem, on_url_request)?;
     // We leak this listener because it will be valid for the life of the program
     Box::leak(Box::new(link_listener));
