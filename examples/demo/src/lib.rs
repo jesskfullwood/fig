@@ -78,59 +78,49 @@ impl fig::Model for Model {
     fn update(&mut self, msg: Msg) -> Cmd<Msg> {
         info!("Update model with message: {:?}", msg);
         match msg {
-            Msg::Select(select) => { self.select = select; Cmd::none() }
-            Msg::FetchSelected(val) => Cmd::spawn(fetch_selected(val)),
+            Msg::Select(select) => self.select = select,
+            Msg::FetchSelected(val) => return Cmd::spawn(fetch_selected(val)),
             Msg::FetchedSelected(val) => {
                 self.server_says = Some(val);
-                Cmd::none()
             }
             Msg::ToggleCheck => {
                 self.check = !self.check;
-                Cmd::none()
             }
             Msg::Input(input) => {
                 self.input = input.to_ascii_lowercase();
-                Cmd::none()
             }
             Msg::ButtonClick => {
                 self.click_ct += 1;
-                Cmd::none()
             }
             Msg::AddLi => {
                 self.list_ct += 1;
-                Cmd::none()
             }
             Msg::RmLi => {
                 if self.list_ct > 0 {
                     self.list_ct -= 1;
                 }
-                Cmd::none()
             }
-            Msg::Route(route) => { self.route = route; Cmd::none() }
+            Msg::Route(route) => self.route = route,
             Msg::ToggleSocket => {
                 self.socket = match self.socket {
-                    SocketState::Closed =>  SocketState::TryOpen,
-                    _ => SocketState::Closed
-                };
-                Cmd::none()
+                    SocketState::Closed => SocketState::TryOpen,
+                    _ => SocketState::Closed,
+                }
             }
             Msg::SocketMessage(SocketMsg::Opened) => {
                 self.socket = SocketState::Open;
-                Cmd::none()
             }
             Msg::SocketMessage(SocketMsg::Msg(msg)) | Msg::SocketMessage(SocketMsg::Err(msg)) => {
                 self.socket_message = Some(msg);
-                Cmd::none()
             }
             Msg::ToggleTicker => {
                 self.ticker = !self.ticker;
-                Cmd::none()
             }
             Msg::Tick => {
                 self.tick_on = !self.tick_on;
-                Cmd::none()
             }
         }
+        Cmd::none()
     }
 
     fn view(&self) -> Html<Model> {
@@ -148,12 +138,10 @@ impl fig::Model for Model {
                 p!(i!("Boldly repeat: "), b!(self.input.clone()))
             ),
             p!(class!("bluesy"), "Classy!"),
-            div!(
-                button!(
-                    on_click((), |()| Msg::ButtonClick),
-                    format!("Clicked: {}", self.click_ct),
-                ),
-            ),
+            div!(button!(
+                on_click((), |()| Msg::ButtonClick),
+                format!("Clicked: {}", self.click_ct),
+            ),),
             div!(
                 button!(
                     if self.ticker {

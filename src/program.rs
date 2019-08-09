@@ -1,6 +1,4 @@
-use crate::{
-    set_link_click_handler, App, Element, Html, JsResult, JsValue, Model, Tag, APP
-};
+use crate::{set_link_click_handler, App, Element, Html, JsResult, JsValue, Model, Tag, APP};
 
 use wasm_bindgen::JsCast;
 use web_sys::{Element as DomElement, HtmlDivElement};
@@ -49,7 +47,6 @@ pub fn run<M: Model>(model: M, target: &str) -> JsResult<()> {
             *inner = app_ptr;
         }
     });
-
 
     // From this point on we only interact with App through App::with.
     // Then it's safe, hopefully.

@@ -33,7 +33,7 @@ pub mod timer;
 pub mod util;
 
 pub use event::{on_click, on_input};
-pub use program::{run};
+pub use program::run;
 pub use url::Url;
 
 pub use wasm_bindgen::JsValue;
@@ -50,11 +50,20 @@ pub trait Model: 'static + Sized + Debug {
     fn view(&self) -> Html<Self>;
     fn update(&mut self, msg: Self::Msg) -> Cmd<Self::Msg>;
 
-    fn subscribe(&self) -> Sub<Self> { Sub::none() }
+    fn subscribe(&self) -> Sub<Self> {
+        Sub::none()
+    }
 
-    fn init(&mut self, url: url::Url) -> Cmd<Self::Msg> { Self::on_url_change(url) }
-    fn on_url_request(req: UrlRequest) -> Cmd<Self::Msg> { util::on_url_request_intercept(req) }
-    fn on_url_change(_url: url::Url) -> Cmd<Self::Msg> { Cmd::none() }
+    fn init(&mut self, url: url::Url) -> Cmd<Self::Msg> {
+        Self::on_url_change(url)
+    }
+    fn on_url_request(req: UrlRequest) -> Cmd<Self::Msg> {
+        util::on_url_request_intercept(req)
+    }
+    #[allow(unused_variables)]
+    fn on_url_change(url: url::Url) -> Cmd<Self::Msg> {
+        Cmd::none()
+    }
 }
 
 // This impl is so we can do quick examples and tests for Html layout.
@@ -62,8 +71,12 @@ pub trait Model: 'static + Sized + Debug {
 // (but see https://github.com/rust-lang/rust/issues/45599)
 impl Model for () {
     type Msg = ();
-    fn view(&self) -> Html<Self> { div![] }
-    fn update(&mut self, _: ()) -> Cmd<()> { Cmd::none() }
+    fn view(&self) -> Html<Self> {
+        div![]
+    }
+    fn update(&mut self, _: ()) -> Cmd<()> {
+        Cmd::none()
+    }
 }
 
 // Convenience alias
