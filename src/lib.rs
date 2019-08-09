@@ -40,26 +40,91 @@ pub use wasm_bindgen::JsValue;
 
 type JsResult<T> = Result<T, JsValue>;
 
-/// A trait to associate a Model with a Msg type.
+/// The core trait of `fig`.
 ///
-/// Necessary to ensure a Model is used with the corrent Msg and vice-versa
-// TODO is it actually necessary?
+/// Implement this trait on a type representing your application state.
 pub trait Model: 'static + Sized + Debug {
+    /// The message type associated with the model.
+    ///
+    /// A Model is never handled directly - all model updates happen through
+    /// passing a Msg to the `Model::update` function.
     type Msg;
 
-    fn view(&self) -> Html<Self>;
+    /// Update the application in response to a message.
+    ///
+    /// Usually this will mean mutating the Model and/or issuing a command.
+    /// ## Example
+    /// ```rust
+    /// fn update(&mut self, msg: Self::Msg) -> Cmd<Self::Msg> {
+    ///     match msg {
+    ///         Msg::ButtonClicked => {
+    ///             self.click_count += 1;
+    ///             Cmd::none()
+    ///         }
+    ///         Msg::Redirect(url) => {
+    ///             Cmd::push_url(url)
+    ///         }
+    ///     }
+    /// }
     fn update(&mut self, msg: Self::Msg) -> Cmd<Self::Msg>;
 
+    /// The view to be rendered to the page.
+    ///
+    /// Views are written in pure Rust, usually with fig's helper macros.
+    /// ## Example
+    /// ```rust
+    /// fn view(&self) -> Html<Self> {
+    ///     use html::*;
+    ///     div![
+    ///         id("my-div"),
+    ///         h1!("Hello from fig!"),
+    ///         button!("Click me!", on_click((), |()| Cmd::msg(Msg::ButtonClicked))),
+    ///         p!(format!("Click count: {}", self.click_count))
+    ///     ]
+    /// }
+    /// ```
+    fn view(&self) -> Html<Self>;
+
+    /// A function to be called at app startup.
+    ///
+    /// It's main use is to load the correct route based on the provided url. The default
+    /// functionality is simply to forward the Url argument to `Model::on_url_change`.
+    ///
+    /// `init` could be used e.g. to recover user info from Session Storage
+    fn init(url: url::Url) -> Cmd<Self::Msg> {
+        Self::on_url_change(url)
+    }
     fn subscribe(&self) -> Sub<Self> {
         Sub::none()
     }
 
-    fn init(&mut self, url: url::Url) -> Cmd<Self::Msg> {
-        Self::on_url_change(url)
-    }
+    /// A function called when a url is requested, e.g. by clicking a link.
+    ///
+    /// * The default behavior for internal links is to emit a `Cmd::load_url` command,
+    ///   which in turn is handled by the `Model::on_url_request` method.
+    /// * The default behavior for external links is to forcibly navigate away from the page
+    ///   (destroying the app)
     fn on_url_request(req: UrlRequest) -> Cmd<Self::Msg> {
         util::on_url_request_intercept(req)
     }
+    /// A function called after the url changes.
+    ///
+    /// Typically this function will parse the new url and notify the Model, so it can render the
+    /// correct page. (By default does nothing)
+    ///
+    /// ## Example
+    /// ```rust
+    /// enum Route {
+    ///     Index,
+    ///     UserHome { username: String },
+    ///     E404
+    /// }
+    /// /* ... */
+    /// fn on_url_change(url: url::Url) -> Cmd<Self::Msg> {
+    ///     let route = parse_url(url);
+    ///     Cmd::msg(Msg::NewRoute(route))
+    /// }
+    /// ```
     #[allow(unused_variables)]
     fn on_url_change(url: url::Url) -> Cmd<Self::Msg> {
         Cmd::none()
@@ -658,14 +723,14 @@ impl<Msg> Cmd<Msg> {
 
     // TODO require a Key to change the url
     /// Change the page url to the supplied path
-    pub fn push_url(s: impl std::fmt::Display) -> Self {
-        Cmd(CmdInner::PushUrl(format!("{}", s).into()))
+    pub fn push_url(url: impl std::fmt::Display) -> Self {
+        Cmd(CmdInner::PushUrl(format!("{}", url).into()))
     }
 
     // TODO require a Key to load the url
     /// Load the supplied url. This forces a page reload (destroying the current app).
-    pub fn load_url(s: impl Into<Str>) -> Self {
-        Cmd(CmdInner::LoadUrl(s.into()))
+    pub fn load_url(url: impl Into<Str>) -> Self {
+        Cmd(CmdInner::LoadUrl(url.into()))
     }
 }
 

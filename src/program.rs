@@ -53,7 +53,7 @@ pub fn run<M: Model>(model: M, target: &str) -> JsResult<()> {
     App::<M>::with(|app| {
         app.set_popstate_handler();
 
-        let initcmd = app.model.init(url);
+        let initcmd = M::init(url);
         // Run initial command, then rerender just to be sure
         app.loop_update(initcmd)?;
 
