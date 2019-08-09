@@ -43,7 +43,7 @@ type JsResult<T> = Result<T, JsValue>;
 /// The core trait of `fig`.
 ///
 /// Implement this trait on a type representing your application state.
-pub trait Model: 'static + Sized + Debug {
+pub trait Model: 'static + Sized {
     /// The message type associated with the model.
     ///
     /// A Model is never handled directly - all model updates happen through
@@ -78,7 +78,7 @@ pub trait Model: 'static + Sized + Debug {
     ///     div![
     ///         id("my-div"),
     ///         h1!("Hello from fig!"),
-    ///         button!("Click me!", on_click((), |()| Cmd::msg(Msg::ButtonClicked))),
+    ///         button!("Click me!", on_click((), |()| Msg::ButtonClicked)),
     ///         p!(format!("Click count: {}", self.click_count))
     ///     ]
     /// }

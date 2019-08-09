@@ -1,21 +1,3 @@
-# Fig
-
-A Rust frontend web framework inspired by [The Elm Architecture](https://guide.elm-lang.org/architecture/).
-
-**Features:**
-* Fast rendering
-* Typesafe event handlers
-* HTML-as-code
-* Push- and PopState support
-* `fetch` requests
-* Timers
-* WebSockets
-
-Built on top of [`wasm_bindgen`](https://github.com/rustwasm/wasm-bindgen).
-
-## Minimal Example
-
-```rust
 use fig::*;
 use wasm_bindgen::prelude::*;
 
@@ -40,6 +22,7 @@ impl fig::Model for Model {
     }
 
     fn view(&self) -> Html<Self> {
+        div![
             style!("font-family" => "Arial", "text-align" => "center"),
             h1!("Hello from fig!"),
             button!("Click me!", on_click((), |()| Msg::ButtonClicked)),
@@ -52,8 +35,3 @@ impl fig::Model for Model {
 pub fn render() {
     fig::run(Model { click_count: 0 }, "app").expect("Failed to start app")
 }
-```
-
-![/examples/quickstart/hello-fig.png]
-
-See the [`quickstart` demo](/examples/quickstart) and the [more fully-featured demo](/examples/demo) for more.

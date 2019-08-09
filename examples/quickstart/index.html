@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Quick Start</title>
+    </head>
+    <body>
+        <div id="app"></div>
+        <script src='/quickstart.js'></script>
+
+        <script>
+         const { render } = wasm_bindgen;
+         wasm_bindgen('/quickstart_bg.wasm')
+             .then(function() { render() })
+             .catch(console.error);
+        </script>
+
+    </body>
+</html>
