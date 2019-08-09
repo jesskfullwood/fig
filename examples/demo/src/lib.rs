@@ -3,7 +3,6 @@ use fig::html::*;
 use fig::select;
 use fig::socket::Socket;
 use fig::timer::Timer;
-use fig::Model as _;
 use fig::*;
 use futures::Future;
 use log::{info, trace};
@@ -51,17 +50,6 @@ enum Route {
     Summary,
 }
 
-fn on_url_change(url: Url) -> Cmd<Msg> {
-    info!("Url changed: {}", url);
-    let route = match url.path() {
-        "/" => Route::Home,
-        "/items" => Route::Items,
-        "/summary" => Route::Summary,
-        _other => return Cmd::load_url("/"),
-    };
-    Cmd::msg(Msg::Route(route))
-}
-
 #[derive(Clone, Debug)]
 enum Msg {
     Select(String),
@@ -86,78 +74,177 @@ struct Data {
 
 impl fig::Model for Model {
     type Msg = Msg;
-}
 
-fn update(msg: Msg, model: Model) -> (Model, Cmd<Msg>) {
-    info!("Update model with message: {:?}", msg);
-    match msg {
-        Msg::Select(select) => Model { select, ..model }.no_cmd(),
-        Msg::FetchSelected(val) => model.with_cmd(Cmd::spawn(fetch_selected(val))),
-        Msg::FetchedSelected(val) => Model {
-            server_says: Some(val),
-            ..model
-        }
-        .no_cmd(),
-        Msg::ToggleCheck => Model {
-            check: !model.check,
-            ..model
-        }
-        .no_cmd(),
-        Msg::Input(input) => Model {
-            input: input.to_ascii_lowercase(),
-            ..model
-        }
-        .no_cmd(),
-        Msg::ButtonClick => Model {
-            click_ct: model.click_ct + 1,
-            ..model
-        }
-        .no_cmd(),
-        Msg::AddLi => Model {
-            list_ct: model.list_ct + 1,
-            ..model
-        }
-        .no_cmd(),
-        Msg::RmLi => Model {
-            list_ct: if model.list_ct > 0 {
-                model.list_ct - 1
-            } else {
-                0
-            },
-            ..model
-        }
-        .no_cmd(),
-        Msg::Route(route) => Model { route, ..model }.no_cmd(),
-        Msg::ToggleSocket => Model {
-            socket: match model.socket {
-                SocketState::Closed => SocketState::TryOpen,
-                _ => SocketState::Closed,
-            },
-            ..model
-        }
-        .no_cmd(),
-        Msg::SocketMessage(SocketMsg::Opened) => Model {
-            socket: SocketState::Open,
-            ..model
-        }
-        .no_cmd(),
-        Msg::SocketMessage(SocketMsg::Msg(msg)) | Msg::SocketMessage(SocketMsg::Err(msg)) => {
-            Model {
-                socket_message: Some(msg),
-                ..model
+    fn update(&mut self, msg: Msg) -> Cmd<Msg> {
+        info!("Update model with message: {:?}", msg);
+        match msg {
+            Msg::Select(select) => { self.select = select; Cmd::none() }
+            Msg::FetchSelected(val) => Cmd::spawn(fetch_selected(val)),
+            Msg::FetchedSelected(val) => {
+                self.server_says = Some(val);
+                Cmd::none()
+            }
+            Msg::ToggleCheck => {
+                self.check = !self.check;
+                Cmd::none()
+            }
+            Msg::Input(input) => {
+                self.input = input.to_ascii_lowercase();
+                Cmd::none()
+            }
+            Msg::ButtonClick => {
+                self.click_ct += 1;
+                Cmd::none()
+            }
+            Msg::AddLi => {
+                self.list_ct += 1;
+                Cmd::none()
+            }
+            Msg::RmLi => {
+                if self.list_ct > 0 {
+                    self.list_ct -= 1;
+                }
+                Cmd::none()
+            }
+            Msg::Route(route) => { self.route = route; Cmd::none() }
+            Msg::ToggleSocket => {
+                self.socket = match self.socket {
+                    SocketState::Closed =>  SocketState::TryOpen,
+                    _ => SocketState::Closed
+                };
+                Cmd::none()
+            }
+            Msg::SocketMessage(SocketMsg::Opened) => {
+                self.socket = SocketState::Open;
+                Cmd::none()
+            }
+            Msg::SocketMessage(SocketMsg::Msg(msg)) | Msg::SocketMessage(SocketMsg::Err(msg)) => {
+                self.socket_message = Some(msg);
+                Cmd::none()
+            }
+            Msg::ToggleTicker => {
+                self.ticker = !self.ticker;
+                Cmd::none()
+            }
+            Msg::Tick => {
+                self.tick_on = !self.tick_on;
+                Cmd::none()
             }
         }
-        .no_cmd(),
-        Msg::ToggleTicker => Model {
-            ticker: !model.ticker,
-            ..model
+    }
+
+    fn view(&self) -> Html<Model> {
+        trace!("Rendering model: {:?}", self);
+        div!(
+            id("my-app"),
+            h1!("Fig demo"),
+            p!("Enter some ", b!("text"), " if you please!"),
+            div!(
+                input!(
+                    value(self.input.clone()),
+                    on_input((), |(), input| Msg::Input(input)),
+                    placeholder("placeholder")
+                ),
+                p!(i!("Boldly repeat: "), b!(self.input.clone()))
+            ),
+            p!(class!("bluesy"), "Classy!"),
+            div!(
+                button!(
+                    on_click((), |()| Msg::ButtonClick),
+                    format!("Clicked: {}", self.click_ct),
+                ),
+            ),
+            div!(
+                button!(
+                    if self.ticker {
+                        "Ticker: On"
+                    } else {
+                        "Ticker: Off"
+                    },
+                    on_click((), |()| Msg::ToggleTicker)
+                ),
+                if self.ticker && self.tick_on {
+                    Some(span!("TICK!"))
+                } else {
+                    None
+                },
+            ),
+            div!(
+                button!(
+                    if let SocketState::Closed = self.socket {
+                        "Websocket: Connect"
+                    } else {
+                        "Websocket: Disconnect"
+                    },
+                    on_click((), |()| Msg::ToggleSocket)
+                ),
+                span!(format!("State: {:?}", self.socket)),
+            ),
+            div!(
+                select!(
+                    on_input((), |(), sel| Msg::Select(sel)),
+                    option!(value("this"), "this"),
+                    option!(value("that"), "that"),
+                    option!(value("other"), "other"),
+                ),
+                button!(
+                    on_click(self.select.clone(), |select| Msg::FetchSelected(
+                        select.clone()
+                    )),
+                    "Send request"
+                ),
+                p!("Our server says:", {
+                    let says = if let Some(ref says) = self.server_says {
+                        says
+                    } else {
+                        "Nothing!"
+                    };
+                    b!(says.to_string())
+                })
+            ),
+            div!(
+                id("links"),
+                p!(a!(href("/"), "Home")),
+                match self.route {
+                    Route::Home => div!(
+                        p!(a!(href("/items"), "View items")),
+                        p!(a!(href("/summary"), "View summary"))
+                    ),
+                    Route::Items => div!(
+                        button!(on_click((), |()| Msg::AddLi), "+ item"),
+                        button!(on_click((), |()| Msg::RmLi), "- item"),
+                        ul!((0..self.list_ct)
+                            .map(|i| li!(format!("List item {}", i)))
+                            .collect::<Vec<_>>()),
+                    ),
+                    Route::Summary => div!(p!(format!("You have created {} items", self.list_ct)),),
+                }
+            )
+        )
+    }
+
+    fn subscribe(&self) -> Sub<Self> {
+        let mut subs: Vec<Box<dyn Subscription<_>>> = Vec::new();
+        if self.ticker {
+            subs.push(Box::new(Timer::new(1000, || Cmd::msg(Msg::Tick))))
         }
-        .no_cmd(),
-        Msg::Tick => Model {
-            tick_on: !model.tick_on,
-            ..model
+        if let SocketState::Closed = self.socket {
+            // To close the socket, we just dispose of it
+        } else {
+            subs.push(Box::new(new_websocket()))
         }
-        .no_cmd(),
+        Sub::new(subs)
+    }
+
+    fn on_url_change(url: Url) -> Cmd<Msg> {
+        info!("Url changed: {}", url);
+        let route = match url.path() {
+            "/" => Route::Home,
+            "/items" => Route::Items,
+            "/summary" => Route::Summary,
+            _other => return Cmd::load_url("/"),
+        };
+        Cmd::msg(Msg::Route(route))
     }
 }
 
@@ -184,19 +271,6 @@ enum SocketMsg {
     Err(String),
 }
 
-fn subscriptions(model: &Model) -> Sub<Model> {
-    let mut subs: Vec<Box<dyn Subscription<_>>> = Vec::new();
-    if model.ticker {
-        subs.push(Box::new(Timer::new(1000, || Cmd::msg(Msg::Tick))))
-    }
-    if let SocketState::Closed = model.socket {
-        // To close the socket, we just dispose of it
-    } else {
-        subs.push(Box::new(new_websocket()))
-    }
-    Sub::new(subs)
-}
-
 fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
     info!("Fetch: '{}'", val);
     fetch::Request::new("http://localhost:8000/api".to_string())
@@ -212,107 +286,8 @@ fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>>
         })
 }
 
-fn view(model: &Model) -> Html<Model> {
-    trace!("Rendering model: {:?}", model);
-    div!(
-        id("my-app"),
-        h1!("Fig demo"),
-        p!("Enter some ", b!("text"), " if you please!"),
-        div!(
-            input!(
-                value(model.input.clone()),
-                on_input((), |(), input| Msg::Input(input)),
-                placeholder("placeholder")
-            ),
-            p!(i!("Boldly repeat: "), b!(model.input.clone()))
-        ),
-        p!(class!("bluesy"), "Classy!"),
-        div!(
-            button!(
-                on_click((), |()| Msg::ButtonClick),
-                format!("Clicked: {}", model.click_ct),
-            ),
-        ),
-        div!(
-            button!(
-                if model.ticker {
-                    "Ticker: On"
-                } else {
-                    "Ticker: Off"
-                },
-                on_click((), |()| Msg::ToggleTicker)
-            ),
-            if model.ticker && model.tick_on {
-                Some(span!("TICK!"))
-            } else {
-                None
-            },
-        ),
-        div!(
-            button!(
-                if let SocketState::Closed = model.socket {
-                    "Websocket: Connect"
-                } else {
-                    "Websocket: Disconnect"
-                },
-                on_click((), |()| Msg::ToggleSocket)
-            ),
-            span!(format!("State: {:?}", model.socket)),
-        ),
-        div!(
-            select!(
-                on_input((), |(), sel| Msg::Select(sel)),
-                option!(value("this"), "this"),
-                option!(value("that"), "that"),
-                option!(value("other"), "other"),
-            ),
-            button!(
-                on_click(model.select.clone(), |select| Msg::FetchSelected(
-                    select.clone()
-                )),
-                "Send request"
-            ),
-            p!("Our server says:", {
-                let says = if let Some(ref says) = model.server_says {
-                    says
-                } else {
-                    "Nothing!"
-                };
-                b!(says.to_string())
-            })
-        ),
-        div!(
-            id("links"),
-            p!(a!(href("/"), "Home")),
-            match model.route {
-                Route::Home => div!(
-                    p!(a!(href("/items"), "View items")),
-                    p!(a!(href("/summary"), "View summary"))
-                ),
-                Route::Items => div!(
-                    button!(on_click((), |()| Msg::AddLi), "+ item"),
-                    button!(on_click((), |()| Msg::RmLi), "- item"),
-                    ul!((0..model.list_ct)
-                        .map(|i| li!(format!("List item {}", i)))
-                        .collect::<Vec<_>>()),
-                ),
-                Route::Summary => div!(p!(format!("You have created {} items", model.list_ct)),),
-            }
-        )
-    )
-}
-
 #[wasm_bindgen]
 pub fn render() {
     console_log::init_with_level(log::Level::Debug).unwrap();
-    fig::application(
-        |_key, url| (Model::default(), on_url_change(url)),
-        view,
-        update,
-        subscriptions,
-        fig::util::on_url_request_intercept,
-        on_url_change,
-        "app",
-    )
-    .expect("Failed to run");
+    fig::run(Model::default(), "app").expect("Failed to run");
 }

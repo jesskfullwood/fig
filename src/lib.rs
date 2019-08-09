@@ -33,7 +33,7 @@ pub mod timer;
 pub mod util;
 
 pub use event::{on_click, on_input};
-pub use program::{application, sandbox};
+pub use program::{run};
 pub use url::Url;
 
 pub use wasm_bindgen::JsValue;
@@ -47,13 +47,14 @@ type JsResult<T> = Result<T, JsValue>;
 pub trait Model: 'static + Sized + Debug {
     type Msg;
 
-    fn no_cmd(self) -> (Self, Cmd<Self::Msg>) {
-        (self, Cmd::none())
-    }
+    fn view(&self) -> Html<Self>;
+    fn update(&mut self, msg: Self::Msg) -> Cmd<Self::Msg>;
 
-    fn with_cmd(self, cmd: Cmd<Self::Msg>) -> (Self, Cmd<Self::Msg>) {
-        (self, cmd)
-    }
+    fn subscribe(&self) -> Sub<Self> { Sub::none() }
+
+    fn init(&mut self, url: url::Url) -> Cmd<Self::Msg> { Self::on_url_change(url) }
+    fn on_url_request(req: UrlRequest) -> Cmd<Self::Msg> { util::on_url_request_intercept(req) }
+    fn on_url_change(_url: url::Url) -> Cmd<Self::Msg> { Cmd::none() }
 }
 
 // This impl is so we can do quick examples and tests for Html layout.
@@ -61,6 +62,8 @@ pub trait Model: 'static + Sized + Debug {
 // (but see https://github.com/rust-lang/rust/issues/45599)
 impl Model for () {
     type Msg = ();
+    fn view(&self) -> Html<Self> { div![] }
+    fn update(&mut self, _: ()) -> Cmd<()> { Cmd::none() }
 }
 
 // Convenience alias
@@ -85,11 +88,7 @@ type Str = Cow<'static, str>;
 struct App<M: Model> {
     window: Window,
     target: HtmlDivElement,
-    model: Option<M>,
-    update: Box<dyn Fn(M::Msg, M) -> (M, Cmd<M::Msg>)>,
-    subscribe: Box<dyn Fn(&M) -> Sub<M>>,
-    view: Box<dyn Fn(&M) -> Html<M>>,
-    on_url_change: &'static dyn Fn(url::Url) -> Cmd<M::Msg>,
+    model: M,
     current_vdom: Html<M>,
     listeners: HashMap<EventId, (usize, Vec<Listener<M>>)>,
     subscriptions: Vec<Box<dyn Subscription<M>>>,
@@ -128,9 +127,7 @@ impl<M: Model> App<M> {
                 // return without rendering. Generally need a Very Good Reason for this
                 CmdInner::NoOp => return Ok(()),
                 CmdInner::Msg(msg) => {
-                    let model = self.model.take().unwrap();
-                    let (new_model, Cmd(new_cmd)) = (self.update)(msg, model);
-                    self.model.replace(new_model);
+                    let Cmd(new_cmd) = self.model.update(msg);
                     cmd = new_cmd; // we go again
                 }
                 CmdInner::Multiple(cmds) => {
@@ -166,7 +163,7 @@ impl<M: Model> App<M> {
                     // Then grab the new href from Location
                     let url = self.location().expect("No location");
                     // and go round again
-                    cmd = ((self.on_url_change)(url)).0;
+                    cmd = M::on_url_change(url).0;
                 }
             }
             if loopct > 100 {
@@ -186,7 +183,7 @@ impl<M: Model> App<M> {
     fn update_subscriptions(&mut self) {
         // TODO I don't think this function is very elegant
 
-        let poss_new_subs = (self.subscribe)(&self.model.as_ref().expect("Model missing"));
+        let poss_new_subs = self.model.subscribe();
         let mut new_subs = Vec::new();
         let mut seen_subs = bit_set::BitSet::new();
 
@@ -217,7 +214,7 @@ impl<M: Model> App<M> {
     }
 
     fn render_dom(&self) -> JsResult<Html<M>> {
-        let new_vdom = (self.view)(self.model.as_ref().unwrap());
+        let new_vdom = self.model.view();
         let diff = diff_vdom(&self.current_vdom, &new_vdom);
         if let Diff::Unchanged = diff {
             trace!("No change");
@@ -282,7 +279,7 @@ impl<M: Model> App<M> {
             // We just want to force a page update with the new Route
             App::<M>::with(|app| {
                 let url = app.location().expect("No location");
-                (app.on_url_change)(url)
+                M::on_url_change(url)
             })
         };
         let cb = crate::event::closure1::<M, _, _>(handler);

@@ -31,8 +31,10 @@ macro_rules! make_html_tags {
             macro_rules! $text {
                 ($d($html:expr),* $d(,)?) => {
                     {
+                        #[allow(unused_imports)]
                         use $crate::{Element, html::{Tag, AcceptParent}};
                         // We create a new Element containing the particular Tag variant
+                        #[allow(unused_mut)]
                         let mut element = Element::tag(Tag::$typ);
                         // For each child Html<Model>, pass it the element
                         // (i.e. the element 'visits' each child).
