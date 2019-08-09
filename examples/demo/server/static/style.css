@@ -1,3 +1,19 @@
+body {
+    font-family: Arial;
+    background-color: #ddd;
+}
+
+div span {
+    padding: 2px;
+}
+
+#my-app {
+    width: 400px;
+    margin: auto;
+    padding: 5px;
+    background-color: #ddf;
+}
+
 .bluesy {
     color: blue;
     background-color: #aaa;

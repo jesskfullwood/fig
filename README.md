@@ -54,7 +54,8 @@ pub fn render() {
 }
 ```
 
-Results in:
+Renders as:
+
 ![hello fig](/examples/quickstart/hello-fig.png)
 
 See the [`quickstart` demo](/examples/quickstart) and the [more fully-featured demo](/examples/demo) for more.

@@ -9,15 +9,11 @@
     </head>
     <body>
         <div id="app"></div>
-        <script src='/static/pkg/package.js'></script>
-
+        <script src='/static/dist/demo.js'></script>
         <script>
          const { render } = wasm_bindgen;
-         function run() {
-             render();
-         }
-         wasm_bindgen('static/pkg/package_bg.wasm')
-             .then(run)
+         wasm_bindgen('static/dist/demo_bg.wasm')
+             .then(function() { render() })
              .catch(console.error);
         </script>
     </body>

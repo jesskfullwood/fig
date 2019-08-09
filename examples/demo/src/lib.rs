@@ -181,13 +181,13 @@ impl fig::Model for Model {
                     )),
                     "Send request"
                 ),
-                p!("Our server says:", {
+                p!("Our server says: ", {
                     let says = if let Some(ref says) = self.server_says {
-                        says
+                        span!(says.clone())
                     } else {
-                        "Nothing!"
+                        span!("Nothing!")
                     };
-                    b!(says.to_string())
+                    b!(says)
                 })
             ),
             div!(
