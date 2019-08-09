@@ -1,6 +1,6 @@
 # Fig
 
-A Rust frontend web framework inspired by [The Elm Architecture](https://guide.elm-lang.org/architecture/).
+A Rust/WASM frontend framework inspired by [The Elm Architecture](https://guide.elm-lang.org/architecture/).
 
 **Features:**
 * Fast rendering
@@ -54,6 +54,7 @@ pub fn render() {
 }
 ```
 
-![/examples/quickstart/hello-fig.png]
+Results in:
+![hello fig](/examples/quickstart/hello-fig.png)
 
 See the [`quickstart` demo](/examples/quickstart) and the [more fully-featured demo](/examples/demo) for more.
