@@ -5,6 +5,7 @@ use wasm_bindgen::prelude::*;
 struct Model {
     wip: String,
     todos: Vec<Todo>,
+    showing: Showing,
 }
 
 fn test() -> Model {
@@ -14,14 +15,15 @@ fn test() -> Model {
             Todo {
                 text: "This".into(),
                 completed: false,
-                state: State::Active,
+                editing: false,
             },
             Todo {
                 text: "That".into(),
                 completed: false,
-                state: State::Active,
+                editing: false,
             },
         ],
+        showing: Showing::All,
     }
 }
 
@@ -29,7 +31,7 @@ fn test() -> Model {
 struct Todo {
     text: String,
     completed: bool,
-    state: State,
+    editing: bool,
 }
 
 impl Todo {
@@ -37,15 +39,16 @@ impl Todo {
         Todo {
             text,
             completed: false,
-            state: State::Active,
+            editing: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum State {
+pub enum Showing {
+    All,
     Active,
-    Editing,
+    Completed,
 }
 
 impl Todo {
@@ -55,26 +58,37 @@ impl Todo {
         } else {
             vec![]
         };
-        if let State::Editing = self.state {
+        if self.editing {
             c.push("editing".into());
         }
         li!(
             Attribute::class(c),
             div!(
                 class!("view"),
-                input!(class!("toggle"), type_("checkbox"),),
-                label!(
-                    self.text.clone(),
-                    on_dbl_click((ix, self.clone()), |(ix, t)| {
+                input!(
+                    class!("toggle"),
+                    type_("checkbox"),
+                    on_click((ix, self.clone()), |(ix, t)| {
                         let mut t = t.clone();
-                        t.state = State::Editing;
+                        t.completed = !t.completed;
                         Msg::TodoUpdate {
                             index: *ix,
                             todo: t,
                         }
                     })
                 ),
-                button!(class!("destroy"))
+                label!(
+                    self.text.clone(),
+                    on_dbl_click((ix, self.clone()), |(ix, t)| {
+                        let mut t = t.clone();
+                        t.editing = true;
+                        Msg::TodoUpdate {
+                            index: *ix,
+                            todo: t,
+                        }
+                    })
+                ),
+                button!(class!("destroy"), on_click(ix, |ix| Msg::RemoveTodo(*ix)))
             ),
             input!(
                 class!("edit"),
@@ -90,7 +104,7 @@ impl Todo {
                 }),
                 on_keydown("Enter", (ix, self.clone()), |(ix, t)| {
                     let mut t = t.clone();
-                    t.state = State::Active;
+                    t.editing = false;
                     Msg::TodoUpdate {
                         index: *ix,
                         todo: t,
@@ -105,6 +119,8 @@ enum Msg {
     NewTodoUpdate(String),
     NewTodo(String),
     TodoUpdate { index: usize, todo: Todo },
+    RemoveTodo(usize),
+    Showing(Showing),
 }
 
 impl fig::Model for Model {
@@ -122,6 +138,10 @@ impl fig::Model for Model {
             Msg::TodoUpdate { index, todo } => {
                 self.todos[index] = todo;
             }
+            Msg::RemoveTodo(ix) => {
+                self.todos.remove(ix);
+            }
+            Msg::Showing(showing) => self.showing = showing,
         };
         Cmd::none()
     }
@@ -130,6 +150,23 @@ impl fig::Model for Model {
         let todos: Vec<_> = self
             .todos
             .iter()
+            .filter_map(|t| match self.showing {
+                Showing::All => Some(t),
+                Showing::Active => {
+                    if t.completed {
+                        None
+                    } else {
+                        Some(t)
+                    }
+                }
+                Showing::Completed => {
+                    if t.completed {
+                        Some(t)
+                    } else {
+                        None
+                    }
+                }
+            })
             .enumerate()
             .map(|(ix, t)| t.view(ix))
             .collect();
@@ -160,11 +197,44 @@ impl fig::Model for Model {
             ul!(
                 class!("filters"),
                 vec![
-                    li!(a!(class!("selected"), "All"),),
+                    li!(
+                        a!(
+                            if let Showing::All = self.showing {
+                                Some(class!("selected"))
+                            } else {
+                                None
+                            },
+                            href("/"),
+                            "All",
+                        ),
+                        on_click((), |()| Msg::Showing(Showing::All))
+                    ),
                     span!(" "),
-                    li!("Active"),
+                    li!(
+                        a!(
+                            if let Showing::Active = self.showing {
+                                Some(class!("selected"))
+                            } else {
+                                None
+                            },
+                            href("/active"),
+                            "Active"
+                        ),
+                        on_click((), |()| Msg::Showing(Showing::Active))
+                    ),
                     span!(" "),
-                    li!("Completed")
+                    li!(
+                        a!(
+                            if let Showing::Completed = self.showing {
+                                Some(class!("selected"))
+                            } else {
+                                None
+                            },
+                            href("/completed"),
+                            "Completed"
+                        ),
+                        on_click((), |()| Msg::Showing(Showing::Completed))
+                    )
                 ]
             )
         ];
