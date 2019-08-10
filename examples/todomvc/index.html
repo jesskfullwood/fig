@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Fig TodoMVC</title>
+        <link rel="stylesheet" type="text/css" href="/app.css">
+    </head>
+    <body>
+        <div id="app"></div>
+        <script src='/todomvc.js'></script>
+
+        <script>
+         const { render } = wasm_bindgen;
+         wasm_bindgen('/todomvc_bg.wasm')
+             .then(function() { render() })
+             .catch(console.error);
+        </script>
+
+    </body>
+</html>

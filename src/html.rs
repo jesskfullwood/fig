@@ -39,7 +39,7 @@ macro_rules! make_html_tags {
                         // For each child Html<Model>, pass it the element
                         // (i.e. the element 'visits' each child).
                         // the '$d' is in fact the dollar symbol. Clever hack or nasty hack?
-                        $d($html.accept_parent_element(&mut element);)*;
+                        $d(AcceptParent::accept_parent_element($html, &mut element);)*;
                         // Wrap the element as Html<Model> and return
                         Html::from(element)
                     }
@@ -50,6 +50,9 @@ macro_rules! make_html_tags {
 }
 
 make_html_tags! {
+    // A list of element tags, in format <Tag::Variant> => <macro_name>
+    // Would be nice to combine into one invocation.
+
     // Why do we pass in the weird '$' symbol? Workaround for macro_rules bug - see
     // https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
     // Would be nice to remove the stuttering here, but I think that would
@@ -62,21 +65,25 @@ make_html_tags! {
     Code => code,
     Div => div,
     Em => em,
+    Footer => footer,
     H1 => h1,
     H2 => h2,
     H3 => h3,
     H4 => h4,
     H5 => h5,
     H6 => h6,
+    Header => header,
     Img => img,
     Hr => hr,
     I => i,
     Input => input,
+    Label => label,
     Li => li,
     Ol => ol,
     Option => option,
     P => p,
     Pre => pre,
+    Section => section,
     Select => select,
     Small => small,
     Span => span,
@@ -172,6 +179,7 @@ macro_rules! attr_def {
 attr_def! {
     Class => Vec<Str> => class,
     Disabled => () => disabled,
+    For => Str => for_,
     Href => Str => href,
     Id => Str => id,
     Placeholder => Str => placeholder,
@@ -192,7 +200,7 @@ impl Attribute {
             Class(classes) => classes.join(" ").into(),
             Disabled(()) => "disabled".into(),
             Selected(()) => "selected".into(),
-            Href(val) | Id(val) | Placeholder(val) | Value(val) | Type(val) => val.clone(),
+            For(val) | Href(val) | Id(val) | Placeholder(val) | Value(val) | Type(val) => val.clone(),
             Style(style) => style.to_string().into(),
         }
     }
@@ -216,6 +224,7 @@ macro_rules! attr_key_value_func {
     };
 }
 
+attr_key_value_func!(for_, For);
 attr_key_value_func!(href, Href);
 attr_key_value_func!(id, Id);
 attr_key_value_func!(placeholder, Placeholder);
@@ -321,25 +330,9 @@ impl<M: Model> AcceptParent<M> for Attribute {
     }
 }
 
-impl<M: Model> AcceptParent<M> for Option<Attribute> {
-    fn accept_parent_element(self, elem: &mut Element<M>) {
-        if let Some(attr) = self {
-            elem.attrs.push(attr)
-        }
-    }
-}
-
 impl<M: Model> AcceptParent<M> for Event<M> {
     fn accept_parent_element(self, elem: &mut Element<M>) {
         elem.events.push(self)
-    }
-}
-
-impl<M: Model> AcceptParent<M> for Option<Event<M>> {
-    fn accept_parent_element(self, elem: &mut Element<M>) {
-        if let Some(event) = self {
-            elem.events.push(event)
-        }
     }
 }
 
@@ -349,10 +342,10 @@ impl<M: Model> AcceptParent<M> for Html<M> {
     }
 }
 
-impl<M: Model> AcceptParent<M> for Option<Html<M>> {
+impl<M: Model, A: AcceptParent<M>> AcceptParent<M> for Option<A> {
     fn accept_parent_element(self, elem: &mut Element<M>) {
         if let Some(inner) = self {
-            elem.children.push(inner)
+            inner.accept_parent_element(elem)
         }
     }
 }
