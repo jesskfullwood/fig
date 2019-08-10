@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 struct Model {
     wip: String,
     todos: Vec<Todo>,
-    showing: Showing,
+    route: Route,
 }
 
 fn test() -> Model {
@@ -23,7 +23,7 @@ fn test() -> Model {
                 editing: false,
             },
         ],
-        showing: Showing::All,
+        route: Route::All,
     }
 }
 
@@ -45,7 +45,7 @@ impl Todo {
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum Showing {
+pub enum Route {
     All,
     Active,
     Completed,
@@ -120,7 +120,7 @@ enum Msg {
     NewTodo(String),
     TodoUpdate { index: usize, todo: Todo },
     RemoveTodo(usize),
-    Showing(Showing),
+    Route(Route),
 }
 
 impl fig::Model for Model {
@@ -141,7 +141,7 @@ impl fig::Model for Model {
             Msg::RemoveTodo(ix) => {
                 self.todos.remove(ix);
             }
-            Msg::Showing(showing) => self.showing = showing,
+            Msg::Route(route) => self.route = route,
         };
         Cmd::none()
     }
@@ -150,16 +150,16 @@ impl fig::Model for Model {
         let todos: Vec<_> = self
             .todos
             .iter()
-            .filter_map(|t| match self.showing {
-                Showing::All => Some(t),
-                Showing::Active => {
+            .filter_map(|t| match self.route {
+                Route::All => Some(t),
+                Route::Active => {
                     if t.completed {
                         None
                     } else {
                         Some(t)
                     }
                 }
-                Showing::Completed => {
+                Route::Completed => {
                     if t.completed {
                         Some(t)
                     } else {
@@ -199,7 +199,7 @@ impl fig::Model for Model {
                 vec![
                     li!(
                         a!(
-                            if let Showing::All = self.showing {
+                            if let Route::All = self.route {
                                 Some(class!("selected"))
                             } else {
                                 None
@@ -207,12 +207,12 @@ impl fig::Model for Model {
                             href("/"),
                             "All",
                         ),
-                        on_click((), |()| Msg::Showing(Showing::All))
+                        on_click((), |()| Msg::Route(Route::All))
                     ),
                     span!(" "),
                     li!(
                         a!(
-                            if let Showing::Active = self.showing {
+                            if let Route::Active = self.route {
                                 Some(class!("selected"))
                             } else {
                                 None
@@ -220,12 +220,12 @@ impl fig::Model for Model {
                             href("/active"),
                             "Active"
                         ),
-                        on_click((), |()| Msg::Showing(Showing::Active))
+                        on_click((), |()| Msg::Route(Route::Active))
                     ),
                     span!(" "),
                     li!(
                         a!(
-                            if let Showing::Completed = self.showing {
+                            if let Route::Completed = self.route {
                                 Some(class!("selected"))
                             } else {
                                 None
@@ -233,7 +233,7 @@ impl fig::Model for Model {
                             href("/completed"),
                             "Completed"
                         ),
-                        on_click((), |()| Msg::Showing(Showing::Completed))
+                        on_click((), |()| Msg::Route(Route::Completed))
                     )
                 ]
             )
@@ -257,6 +257,16 @@ impl fig::Model for Model {
                 p!("Design by ", a!("TodoMVC", href("http://todomvc.com")))
             ]
         ]
+    }
+
+    fn on_url_change(url: Url) -> Cmd<Msg> {
+        let route = match url.path() {
+            "/" => Route::All,
+            "/active" => Route::Active,
+            "/completed" => Route::Completed,
+            _other => return Cmd::load_url("/"),  // redirect
+        };
+        Cmd::msg(Msg::Route(route))
     }
 }
 
