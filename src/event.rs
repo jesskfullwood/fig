@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use derive_more::Display;
 use wasm_bindgen::{closure::Closure, JsCast};
-use web_sys::{Element as DomElement, Event as DomEvent, HtmlElement};
+use web_sys::{Element as DomElement, Event as DomEvent, HtmlElement, KeyboardEvent};
 
 use crate::util;
 use crate::{App, Cmd, JsResult, Model, Str};
@@ -41,14 +41,18 @@ pub struct Event<M: Model> {
 
 pub(crate) enum EventInner<M: Model> {
     OnClick(Rc<dyn Fn() -> M::Msg>),
+    OnDblClick(Rc<dyn Fn() -> M::Msg>),
     OnInput(Rc<dyn Fn(String) -> M::Msg>),
+    OnKeyDown(&'static str, Rc<dyn Fn() -> M::Msg>),
 }
 
 impl<M: Model> fmt::Debug for Event<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.inner {
             EventInner::OnClick(_) => write!(f, "OnClickEvent({})", self.id),
+            EventInner::OnDblClick(_) => write!(f, "OnDblClickEvent({})", self.id),
             EventInner::OnInput(_) => write!(f, "OnInputEvent({})", self.id),
+            EventInner::OnKeyDown(key, _) => write!(f, "OnKeyDownEvent({}, {})", key, self.id),
         }
     }
 }
@@ -81,17 +85,33 @@ impl<M: Model> Event<M> {
     fn click<S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
         // Can't hash fn ptr - compiler bug! Do very unsafe workaround
         // https://github.com/rust-lang/rust/issues/46989
-        let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-        let hash = hash_closure(&s, ptr);
+        let hash = hash_closure(&s, f as usize);
         Event {
             id: EventId(hash),
             inner: EventInner::OnClick(Rc::new(move || f(&s))),
         }
     }
 
+    fn dbl_click<S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
+        // Can't hash fn ptr - compiler bug! Do very unsafe workaround
+        // https://github.com/rust-lang/rust/issues/46989
+        let hash = hash_closure(&s, f as usize);
+        Event {
+            id: EventId(hash),
+            inner: EventInner::OnDblClick(Rc::new(move || f(&s))),
+        }
+    }
+
+    pub fn keydown<S: Hash + 'static>(key: &'static str, s: S, f: fn(&S) -> M::Msg) -> Event<M> {
+        let hash = hash_closure(&s, f as usize);
+        Event {
+            id: EventId(hash),
+            inner: EventInner::OnKeyDown(key, Rc::new(move || f(&s))),
+        }
+    }
+
     pub fn input<S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
-        let ptr = unsafe { std::mem::transmute::<_, usize>(f) };
-        let hash = hash_closure(&s, ptr);
+        let hash = hash_closure(&s, f as usize);
         Event {
             id: EventId(hash),
             inner: EventInner::OnInput(Rc::new(move |val| f(&s, val))),
@@ -106,8 +126,22 @@ fn hash_closure<S: Hash, F: Hash>(s: S, f: F) -> u64 {
     hasher.finish()
 }
 
+/// Event to fire upon mouse click
 pub fn on_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
     Event::click(s, f)
+}
+
+/// Event to fire upon mouse double-click
+pub fn on_dbl_click<M: Model, S: Hash + 'static>(s: S, f: fn(s: &S) -> M::Msg) -> Event<M> {
+    Event::dbl_click(s, f)
+}
+
+pub fn on_keydown<M: Model, S: Hash + 'static>(
+    key: &'static str,
+    s: S,
+    f: fn(&S) -> M::Msg,
+) -> Event<M> {
+    Event::keydown(key, s, f)
 }
 
 pub fn on_input<M: Model, S: Hash + 'static>(s: S, f: fn(&S, String) -> M::Msg) -> Event<M> {
@@ -215,6 +249,22 @@ fn input_handler<M: Model>(
     attach_event_handler::<M, _, _>(element.clone(), "input", inner)
 }
 
+fn key_handler<M: Model>(
+    key: &'static str,
+    element: &DomElement,
+    handler: Rc<dyn Fn() -> M::Msg>,
+) -> JsResult<Listener<M>> {
+    let inner = move |event: DomEvent| {
+        let event: &KeyboardEvent = event.unchecked_ref();
+        if event.key() == key {
+            Cmd::msg(handler())
+        } else {
+            Cmd::none()
+        }
+    };
+    attach_event_handler::<M, _, _>(element.clone(), "keydown", inner)
+}
+
 fn click_handler<M: Model>(
     element: &DomElement,
     handler: Rc<dyn Fn() -> M::Msg>,
@@ -223,12 +273,22 @@ fn click_handler<M: Model>(
     attach_event_handler::<M, _, _>(element.clone(), "click", inner)
 }
 
+fn dbl_click_handler<M: Model>(
+    element: &DomElement,
+    handler: Rc<dyn Fn() -> M::Msg>,
+) -> JsResult<Listener<M>> {
+    let inner = move |_event: DomEvent| Cmd::msg(handler());
+    attach_event_handler::<M, _, _>(element.clone(), "dblclick", inner)
+}
+
 pub(crate) fn attach_event_listener<M: Model>(
     event: &Event<M>,
     element: &DomElement,
 ) -> JsResult<Listener<M>> {
     match &event.inner {
         EventInner::OnClick(cb) => click_handler::<M>(&element, cb.clone()),
+        EventInner::OnDblClick(cb) => dbl_click_handler::<M>(&element, cb.clone()),
         EventInner::OnInput(cb) => input_handler::<M>(&element, cb.clone()),
+        EventInner::OnKeyDown(key, cb) => key_handler::<M>(key, &element, cb.clone()),
     }
 }

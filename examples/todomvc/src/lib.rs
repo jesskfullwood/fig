@@ -2,50 +2,109 @@ use fig::html::*;
 use fig::*;
 use wasm_bindgen::prelude::*;
 
-#[derive(Default)]
 struct Model {
+    wip: String,
     todos: Vec<Todo>,
 }
 
 fn test() -> Model {
     Model {
-        // todos: vec![
-        //     Todo { text: "This".into(), state: State::Active },
-        //     Todo { text: "That".into(), state: State::Completed },
-        // ]
-        todos: vec![],
+        wip: String::new(),
+        todos: vec![
+            Todo {
+                text: "This".into(),
+                completed: false,
+                state: State::Active,
+            },
+            Todo {
+                text: "That".into(),
+                completed: false,
+                state: State::Active,
+            },
+        ],
     }
 }
 
+#[derive(Debug, Clone, Hash)]
 struct Todo {
     text: String,
+    completed: bool,
     state: State,
 }
 
+impl Todo {
+    fn new(text: String) -> Todo {
+        Todo {
+            text,
+            completed: false,
+            state: State::Active,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash)]
 pub enum State {
     Active,
-    Completed,
+    Editing,
 }
 
 impl Todo {
-    fn view(&self) -> Html<Model> {
+    fn view(&self, ix: usize) -> Html<Model> {
+        let mut c = if self.completed {
+            vec!["completed".into()]
+        } else {
+            vec![]
+        };
+        if let State::Editing = self.state {
+            c.push("editing".into());
+        }
         li!(
+            Attribute::class(c),
             div!(
                 class!("view"),
-                input!(
-                    class!("toggle"),
-                    type_("checkbox"),
-                    label!(self.text.clone()),
-                    button!(class!("destroy"))
-                )
+                input!(class!("toggle"), type_("checkbox"),),
+                label!(
+                    self.text.clone(),
+                    on_dbl_click((ix, self.clone()), |(ix, t)| {
+                        let mut t = t.clone();
+                        t.state = State::Editing;
+                        Msg::TodoUpdate {
+                            index: *ix,
+                            todo: t,
+                        }
+                    })
+                ),
+                button!(class!("destroy"))
             ),
-            input!(class!("edit"), value(self.text.clone()))
+            input!(
+                class!("edit"),
+                value(self.text.clone()),
+                // TODO I don't like this. It was confusing. Opaque error message
+                on_input((ix, self.clone()), |(ix, t), s| {
+                    let mut t = t.clone();
+                    t.text = s;
+                    Msg::TodoUpdate {
+                        index: *ix,
+                        todo: t,
+                    }
+                }),
+                on_keydown("Enter", (ix, self.clone()), |(ix, t)| {
+                    let mut t = t.clone();
+                    t.state = State::Active;
+                    Msg::TodoUpdate {
+                        index: *ix,
+                        todo: t,
+                    }
+                }),
+            )
         )
     }
 }
 
 enum Msg {
-    ButtonClicked,
+    NewTodoUpdate(String),
+    NewTodo(String),
+    TodoUpdate { index: usize, todo: Todo },
 }
 
 impl fig::Model for Model {
@@ -53,16 +112,38 @@ impl fig::Model for Model {
 
     fn update(&mut self, msg: Self::Msg) -> Cmd<Self::Msg> {
         match msg {
-            Msg::ButtonClicked => Cmd::none(),
-        }
+            Msg::NewTodoUpdate(text) => {
+                self.wip = text;
+            }
+            Msg::NewTodo(text) => {
+                self.todos.push(Todo::new(text));
+                self.wip = String::new();
+            }
+            Msg::TodoUpdate { index, todo } => {
+                self.todos[index] = todo;
+            }
+        };
+        Cmd::none()
     }
 
     fn view(&self) -> Html<Self> {
-        let todos: Vec<_> = self.todos.iter().map(|t| t.view()).collect();
+        let todos: Vec<_> = self
+            .todos
+            .iter()
+            .enumerate()
+            .map(|(ix, t)| t.view(ix))
+            .collect();
         let header = header![
             class!("header"),
             h1!("todos"),
-            input![class!("new-todo"), placeholder("What needs to be done?")]
+            input![
+                class!("new-todo"),
+                placeholder("What needs to be done?"),
+                on_input((), |(), s| Msg::NewTodoUpdate(s.clone())),
+                on_keydown("Enter", self.wip.clone(), |wip| Msg::NewTodo(wip.clone())),
+                value(self.wip.clone()),
+                self.wip.clone()
+            ]
         ];
         let main = section![
             class!("main"),
@@ -87,16 +168,18 @@ impl fig::Model for Model {
                 ]
             )
         ];
-        section![
-            class!("todoapp"),
-            div!(
-                header,
-                if self.todos.len() > 0 {
-                    Some((main, footer))
-                } else {
-                    None
-                }
-            ),
+        div![
+            section![
+                class!("todoapp"),
+                div!(
+                    header,
+                    if self.todos.len() > 0 {
+                        Some((main, footer))
+                    } else {
+                        None
+                    }
+                ),
+            ],
             footer![
                 class!("info"),
                 p!("Double-click to edit a todo"),

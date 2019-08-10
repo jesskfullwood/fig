@@ -32,7 +32,8 @@ pub mod socket;
 pub mod timer;
 pub mod util;
 
-pub use event::{on_click, on_input};
+// TODO probably shouldn't re-export here
+pub use event::{on_click, on_dbl_click, on_input, on_keydown};
 pub use program::run;
 pub use url::Url;
 

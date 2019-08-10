@@ -176,16 +176,17 @@ macro_rules! attr_def {
     }
 }
 
+// Generate Attribute variants, along with their contents and key name
 attr_def! {
     Class => Vec<Str> => class,
     Disabled => () => disabled,
-    For => Str => for_,
+    For => Str => for,
     Href => Str => href,
     Id => Str => id,
     Placeholder => Str => placeholder,
     Selected => () => selected,
     Style => Style => style,
-    Type => Str => type_,
+    Type => Str => type,
     Value => Str => value
 }
 
@@ -200,7 +201,9 @@ impl Attribute {
             Class(classes) => classes.join(" ").into(),
             Disabled(()) => "disabled".into(),
             Selected(()) => "selected".into(),
-            For(val) | Href(val) | Id(val) | Placeholder(val) | Value(val) | Type(val) => val.clone(),
+            For(val) | Href(val) | Id(val) | Placeholder(val) | Value(val) | Type(val) => {
+                val.clone()
+            }
             Style(style) => style.to_string().into(),
         }
     }
