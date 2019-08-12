@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Db Monster</title>
+    </head>
+    <body>
+        <div id="app"></div>
+        <script src='/dbmon.js'></script>
+
+        <script>
+         const { render } = wasm_bindgen;
+         wasm_bindgen('/dbmon_bg.wasm')
+             .then(function() { render() })
+             .catch(console.error);
+        </script>
+
+    </body>
+</html>

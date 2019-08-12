@@ -87,6 +87,10 @@ make_html_tags! {
     Select => select,
     Small => small,
     Span => span,
+    Table => table,
+    Tbody => tbody,
+    Td => td,
+    Tr => tr,
     Ul => ul
 }
 
@@ -119,12 +123,6 @@ impl_to_attrs!(A, B, C, D, E, F, G, H, I);
 
 pub trait ToHtml<M: Model>: Sized {
     fn into_html(self) -> Vec<Html<M>>;
-}
-
-impl<M: Model, I: Into<Html<M>>> ToHtml<M> for Vec<I> {
-    fn into_html(self) -> Vec<Html<M>> {
-        self.into_iter().map(Into::into).collect()
-    }
 }
 
 macro_rules! impl_to_html {
@@ -319,6 +317,7 @@ impl<M: Model> AcceptParent<M> for Str {
     }
 }
 
+// TODO use specialization to implement for any Iterator
 impl<M: Model, E: AcceptParent<M>> AcceptParent<M> for Vec<E> {
     fn accept_parent_element(self, elem: &mut Element<M>) {
         for modifier in self {
@@ -372,5 +371,13 @@ impl<M: Model> AcceptParent<M> for (Html<M>, Html<M>, Html<M>) {
         elem.children.push(l);
         elem.children.push(m);
         elem.children.push(r);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn test_simple_html() {
+        let elems = div!(p!("hello world"));
     }
 }

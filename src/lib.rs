@@ -440,7 +440,7 @@ fn set_link_click_handler<M: Model, F: Fn(UrlRequest) -> Cmd<M::Msg> + 'static>(
 }
 
 #[derive(Clone, Debug)]
-pub enum Delta<T> {
+enum Delta<T> {
     Add(T),
     Remove(T),
 }
@@ -632,7 +632,7 @@ fn render_diff<'a, M: Model>(
             Diff::Unchanged => (),
             Diff::Insert(node) => {
                 // Is there already a node at this index?
-                let new_el = node.render_to_html(doc)?;
+                let new_el = node.create_dom_node(doc)?;
                 // XXX insert child, not append!
                 this_el.append_child(&new_el)?;
             }
@@ -644,7 +644,7 @@ fn render_diff<'a, M: Model>(
                     App::<M>::with(|app| app.remove_event_listener(event_id));
                 }
                 let old_el = child_els.get(ix).expect("bad replace node index");
-                let new_el = node.render_to_html(doc)?;
+                let new_el = node.create_dom_node(doc)?;
                 this_el.replace_child(&new_el, &old_el)?;
             }
             Diff::Remove { events_to_rm } => {
@@ -778,10 +778,10 @@ impl<M: Model> std::fmt::Display for Html<M> {
 }
 
 impl<M: Model> Html<M> {
-    fn render_to_html(&self, doc: &Document) -> JsResult<Node> {
+    fn create_dom_node(&self, doc: &Document) -> JsResult<Node> {
         match self {
             Html::Text(text) => Text::new_with_data(text).map(|t| t.unchecked_into()),
-            Html::Element(elem) => elem.render_to_html(doc).map(|t| t.unchecked_into()),
+            Html::Element(elem) => elem.create_dom_node(doc).map(|t| t.unchecked_into()),
         }
     }
 
@@ -842,7 +842,7 @@ impl<M: Model> Element<M> {
         Ok(())
     }
 
-    fn render_to_html(&self, document: &Document) -> JsResult<DomElement> {
+    fn create_dom_node(&self, document: &Document) -> JsResult<DomElement> {
         let element = document.create_element(&self.tag.to_string())?;
         self.add_attrs(&element)?;
         for event in &self.events {
@@ -850,7 +850,7 @@ impl<M: Model> Element<M> {
             App::<M>::with(|app| app.stash_event_listener(event.id(), listener));
         }
         for child in &self.children {
-            let child_elem = child.render_to_html(document)?;
+            let child_elem = child.create_dom_node(document)?;
             element.append_child(&child_elem)?;
         }
         Ok(element)
