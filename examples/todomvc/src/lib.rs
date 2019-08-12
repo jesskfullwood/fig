@@ -271,6 +271,6 @@ impl fig::Model for Model {
 }
 
 #[wasm_bindgen]
-pub fn render() {
+pub fn run() {
     fig::run(test(), "app").expect("Failed to start app")
 }
