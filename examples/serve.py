@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# taken from https://github.com/David-OConnor/seed/blob/9d1652f0a2e88406800a8eba3379b857f4746b61/examples/counter/serve.py
-
 import http.server
 import os
 import socketserver

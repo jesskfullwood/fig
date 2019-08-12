@@ -4,6 +4,11 @@ set -e
 
 cargo build --target wasm32-unknown-unknown --release
 mkdir -p ./dist
-wasm-bindgen target/wasm32-unknown-unknown/release/todomvc.wasm --no-modules --out-dir ./dist --out-name todomvc
-cp index.html app.css dist/
-python3 ../serve.py dist
+
+wasm-bindgen target/wasm32-unknown-unknown/release/todomvc.wasm \
+             --target no-modules \
+             --no-typescript \
+             --out-dir ./dist \
+             --out-name app
+
+../serve.py dist

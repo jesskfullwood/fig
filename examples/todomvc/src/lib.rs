@@ -264,7 +264,7 @@ impl fig::Model for Model {
             "/" => Route::All,
             "/active" => Route::Active,
             "/completed" => Route::Completed,
-            _other => return Cmd::load_url("/"),  // redirect
+            _other => return Cmd::load_url("/"), // redirect
         };
         Cmd::msg(Msg::Route(route))
     }
