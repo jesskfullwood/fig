@@ -39,7 +39,7 @@ macro_rules! make_html_tags {
                         // For each child Html<Model>, pass it the element
                         // (i.e. the element 'visits' each child).
                         // the '$d' is in fact the dollar symbol. Clever hack or nasty hack?
-                        $d(AcceptParent::accept_parent_element($html, &mut element);)*;
+                        $d(AcceptParent::accept_parent_element($html, &mut element);)*
                         // Wrap the element as Html<Model> and return
                         Html::from(element)
                     }

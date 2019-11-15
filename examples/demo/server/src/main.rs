@@ -34,17 +34,17 @@ struct MyActor;
 impl actix::Actor for MyActor {
     type Context = ws::WebsocketContext<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {
+    fn started(&mut self, _ctx: &mut Self::Context) {
         info!("Websocket actor started");
     }
 
-    fn stopped(&mut self, ctx: &mut Self::Context) {
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
         info!("Websocket actor stopped");
     }
 }
 
 impl actix::StreamHandler<ws::Message, ws::ProtocolError> for MyActor {
-    fn handle(&mut self, msg: ws::Message, ctx: &mut Self::Context) {
+    fn handle(&mut self, msg: ws::Message, _ctx: &mut Self::Context) {
         info!("Socket message: {:?}", msg);
     }
 }

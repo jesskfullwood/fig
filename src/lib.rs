@@ -6,9 +6,13 @@
 #[macro_use]
 extern crate log;
 
+// re-exports
+pub use futures;
+pub use reqwest;
+
 use derive_more::{Constructor, From};
 use downcast_rs::{impl_downcast, Downcast};
-use futures::Future;
+use futures::FutureExt;
 use js_sys::Function;
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
@@ -19,13 +23,14 @@ use web_sys::{
 use std::borrow::{BorrowMut, Cow};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{self, Debug};
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 use event::{Event, EventId, Listener};
 use html::{Attribute, Tag};
 
 pub mod event;
-pub mod fetch;
 pub mod html;
 pub mod program;
 pub mod socket;
@@ -218,13 +223,9 @@ impl<M: Model> App<M> {
                     break;
                 }
                 CmdInner::Spawn(request) => {
-                    let fut = request.then(|res: Result<Cmd<M::Msg>, Cmd<M::Msg>>| {
-                        let cmd = match res {
-                            Ok(ok) => ok,
-                            Err(e) => e,
-                        };
+                    let fut = request.map(|cmd| {
                         App::<M>::with(|app| app.loop_update(cmd).expect("update failed"));
-                        Ok(())
+                        ()
                     });
                     wasm_bindgen_futures::spawn_local(fut);
                     break;
@@ -688,7 +689,7 @@ enum CmdInner<Msg> {
     NoOp,
     Msg(Msg),
     Multiple(Vec<Cmd<Msg>>),
-    Spawn(Box<dyn Future<Item = Cmd<Msg>, Error = Cmd<Msg>>>),
+    Spawn(Pin<Box<dyn Future<Output = Cmd<Msg>>>>),
     LoadUrl(Str),
     PushUrl(Str),
 }
@@ -718,8 +719,8 @@ impl<Msg> Cmd<Msg> {
 
     /// Spawn a future. When the future resolves, the message will be run in the
     /// event loop.
-    pub fn spawn(fut: impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> + 'static) -> Self {
-        Cmd(CmdInner::Spawn(Box::new(fut)))
+    pub fn spawn(fut: impl Future<Output = Cmd<Msg>> + 'static) -> Self {
+        Cmd(CmdInner::Spawn(Box::pin(fut)))
     }
 
     // TODO require a Key to change the url
@@ -746,6 +747,10 @@ pub struct Sub<M: Model>(Vec<Box<dyn Subscription<M>>>);
 impl<M: Model> Sub<M> {
     pub fn none() -> Self {
         Sub(Vec::new())
+    }
+
+    pub fn sub<S: Subscription<M>>(sub: S) -> Self {
+        Sub(vec![Box::new(sub)])
     }
 
     pub fn new(ss: Vec<Box<dyn Subscription<M>>>) -> Self {

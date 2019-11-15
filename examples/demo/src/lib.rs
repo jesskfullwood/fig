@@ -1,12 +1,12 @@
-use fig::fetch;
 use fig::html::*;
 use fig::select;
 use fig::socket::Socket;
 use fig::timer::Timer;
 use fig::*;
-use futures::Future;
 use log::{info, trace};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
 // TODO remove this dependency
 use wasm_bindgen::prelude::*;
 
@@ -113,6 +113,7 @@ impl fig::Model for Model {
             Msg::SocketMessage(SocketMsg::Msg(msg)) | Msg::SocketMessage(SocketMsg::Err(msg)) => {
                 self.socket_message = Some(msg);
             }
+            Msg::SocketMessage(SocketMsg::Closed) => self.socket = SocketState::Closed,
             Msg::ToggleTicker => {
                 self.ticker = !self.ticker;
             }
@@ -239,9 +240,10 @@ impl fig::Model for Model {
 fn new_websocket() -> Socket<Model> {
     Socket::new(
         "ws://localhost:8000/ws",
-        || Msg::SocketMessage(SocketMsg::Opened).into(),
+        |_handle| Msg::SocketMessage(SocketMsg::Opened).into(),
         |msg| Msg::SocketMessage(SocketMsg::Msg(format!("Message: {:?}", msg))).into(),
         |err| Msg::SocketMessage(SocketMsg::Err(format!("Error: {:?}", err))).into(),
+        |_closed| Msg::SocketMessage(SocketMsg::Closed).into(),
     )
 }
 
@@ -257,21 +259,27 @@ enum SocketMsg {
     Opened,
     Msg(String),
     Err(String),
+    Closed,
 }
 
-fn fetch_selected(val: String) -> impl Future<Item = Cmd<Msg>, Error = Cmd<Msg>> {
+async fn fetch_selected(val: String) -> Cmd<Msg> {
+    _fetch_selected(val).await.map(Cmd::msg).unwrap_or(Cmd::none())
+}
+
+async fn _fetch_selected(val: String) -> Option<Msg> {
     info!("Fetch: '{}'", val);
-    fetch::Request::new("http://localhost:8000/api".to_string())
-        .method(fetch::Method::Post)
-        .send_json(&Data { data: val })
-        .fetch_json_data(|res: Result<Data, _>| {
-            if let Ok(data) = res {
-                Cmd::msg(Msg::FetchedSelected(data.data))
-            } else {
-                // TODO display the error somewhere
-                Cmd::none()
-            }
-        })
+    let body = serde_json::to_string(&Data { data: val }).unwrap();
+    let response = Client::new()
+        .post("http://localhost:8000/api")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .ok()?;
+
+    let text = response.text().await.ok()?;
+    let data: Data = serde_json::from_str(&text).ok()?;
+    Some(Msg::FetchedSelected(data.data))
 }
 
 #[wasm_bindgen]
